@@ -1,11 +1,4 @@
-set.seed(123) # for reproducibility
-n <- 100      # number of observations
-m <- 50       # number of bins
-
-options(scipen = 999, digits = 5)
-
-x <- rbeta(n, 10, 10)
-hist(x, breaks = m, xlim = c(0,1), col = "lightblue", main = "Beta(10,10) distribution")
+## FUNCTIONS
 
 rlaplace <- function(n, mu = 0, b = 1) {
   r <- runif(n, 0, 1)
@@ -13,47 +6,86 @@ rlaplace <- function(n, mu = 0, b = 1) {
   return(r)
 }
 
-perturb <- function(x, epsilon, n_bins) {
-  n <- length(x)
-  bin <- cut(x, n_bins)
-  bin <- as.numeric(bin)
-  # count the number of elements in each bin
-  count <- table(bin)
-  p_hat <- count / n
-
+perturb <- function(x, epsilon, breaks) {
+  
+  h <- hist(x, breaks = breaks, plot = FALSE)
+  counts <- h$counts
+  p_hat <- h$density
+  
   # add noise to each bin
-  count <- count + rlaplace(n_bins, 0, 8 / epsilon^2)
+  counts <- counts + rlaplace(length(counts), 0, 8 / epsilon^2)
   # count 0 or max
-  count[count < 0] <- 0
-  q <- count / sum(count)
-
+  counts[counts < 0] <- 0 
+  q_hat <- counts / sum(counts) * length(counts)
+  
   # return $p_hat and $q
-  return(list(p_hat = p_hat, q = q))
+  return(list(p_hat = p_hat, q_hat = q_hat))
 }
 
-eps <- 0.1
+ePDF <- function(x, hist_prob, breaks) {
+  # An m by n matrix to compare x with break points
+  breaks_matrix <- matrix(breaks, nrow = length(x), ncol = length(breaks), byrow = TRUE)
+  
+  # An n-dimensional vector to store which bin each x falls into
+  bins <- rowSums(breaks_matrix < x)
+  
+  # Assign the probability of each bin to the corresponding x
+  d <- hist_prob[bins]
+  
+  # if x is outside the range of breaks, then d = 0
+  d[is.na(d)] <- 0 
+  
+  return(d)
+}
 
-n_bins <- m
+mise <- function(original, approx, start, end) {
+  integrand <- function(x) (original(x) - approx(x))^2
+  return(integrate(integrand, start, end, subdivisions = 1000, stop.on.error = FALSE)$value)
+}
 
-n <- length(x)
-bin <- cut(x, n_bins)
-bin <- as.numeric(bin)
-# count the number of elements in each bin
+sim_mise <- function(S, eps, m, n, rdist, ddist) {
+  # S: number of simulations
+  # eps: epsilon
+  # m: number of bins
+  # n: sample size
+  # rdist: random distribution
+  # ddist: true distribution
+  breaks <- (1:(m + 1) - 1) / m
+  
+  p_mises <- rep(NA, S)
+  q_mises <- rep(NA, S)
+  for (i in 1:S) {
+    # generate data
+    x <- rdist(n)
+    # get densities
+    res <- perturb(x, eps, breaks)
+    # compute MISE
+    p_mises[i] <- mise(ddist, function(x) ePDF(x, res$p_hat, breaks), 0, 1)
+    q_mises[i] <- mise(ddist, function(x) ePDF(x, res$q_hat, breaks), 0, 1)
+  }
+  return(list(p_mises = mean(p_mises), q_mises = mean(q_mises)))
+}
+
+library(readr)
+daily_steps <- read_csv("data/daily_steps.csv", 
+                        col_types = cols(date = col_date(format = "%Y-%m-%d"),
+                                         value = col_integer()))
 
 
-count <- table(factor(bin, levels = 1:n_bins))
-p_hat <- count / n
-count
-# add noise to each bin
-count <- count + rlaplace(n_bins, 0, 8 / 1^2)
+x <- daily_steps$value
+# Number of bins
+m      <- 10
+breaks <- (0:m / m) * (max(x) - min(x)) + min(x)
 
-res <- perturb(x, eps, m)
-# print res$p_hat and res$q
-res$p_hat
-res$q
+# Let's see the distrubution
+hist(x, breaks=breaks, main="Djem's daily steps after his arrival in Rome",
+     col = 'wheat1')
 
-# plot the empircal histogram and the privatized histogram
-barplot(res$p_hat, names.arg = 1:m, col = "lightblue", ylim = c(0, max(res$p_hat) * 1.1), main = "Empirical histogram")
+eps <- 1
+res <- perturb(x, eps, breaks)
 
-# plot the perturbed histogram
-barplot(res$q, col = "lightblue", ylim = c(0, max(res$q) + 0.01), main = "Perturbed Histogram")
+# The values of the bins
+barplot(res$p_hat, col = 'wheat1', main = 'Values of p-hat', space=0)
+barplot(res$q_hat, col = 'wheat2', main = 'Values of q-hat', space=0)
+
+

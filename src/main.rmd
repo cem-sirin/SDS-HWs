@@ -11,7 +11,7 @@ date: "`r Sys.Date()`"
 
 ### Setting up the landscape
 
-We want to be sure that we have the necessary functions before we start answering the questions. We will apply the Perturbed Histogram (Dwork et al., 2006) to privatize the data. The idea is to divide the data into $m$ bins, and then add a random noise to each bin. The noise is drawn from a Laplace distribution with scale parameter $\frac{\epsilon}{n}$, where $\epsilon$ is the privacy budget. The following code implements the Perturbed Histogram algorithm.
+We want to be sure that we have the necessary functions before we start answering the questions. We will apply the Perturbed Histogram (Dwork et al., 2006) to privatize the data. The process starts with dividing the data into $m$ bins, and follows by adding noise to each bin count. Below is the function `perturb`, that takes the data, the number of bins, and the variance parameter $\epsilon$ as inputs, and returns the PMF for the original and perturbed data.The function `laplace` is to generate Laplacian noise. Lastly, the function `ePDF` constructs pdf functions from the probability mass functions obtained from the perturbed histogram.
 
 ```{r}
 rlaplace <- function(n, mu = 0, b = 1) {
@@ -35,11 +35,8 @@ perturb <- function(x, epsilon, breaks) {
   # return $p_hat and $q
   return(list(p_hat = p_hat, q_hat = q_hat))
 }
-```
 
-```{r}
-
-ePDF <- function(x, hist_prob, breaks) {
+ePDF <- function(x, pmf, breaks) {
   # An m by n matrix to compare x with break points
   breaks_matrix <- matrix(breaks, nrow = length(x), ncol = length(breaks), byrow = TRUE)
 
@@ -47,39 +44,46 @@ ePDF <- function(x, hist_prob, breaks) {
   bins <- rowSums(breaks_matrix < x)
 
   # Assign the probability of each bin to the corresponding x
-  d <- hist_prob[bins]
+  d <- pmf[bins]
 
   # if x is outside the range of breaks, then d = 0
   d[is.na(d)] <- 0 
 
   return(d)
 }
+```
+
+To test the functions, let's generate a random sample from a uniform distribution with mean 0 and standard deviation 1, and apply the perturbed histogram to it. We will use 10 bins, and $\epsilon = 0.1$.
+
+```{r}
+set.seed(123)
+
+test1 <- perturb(runif(1000), 0.5, 0:10 / 10)
+# Two barplots side by side
+par(mfrow = c(1, 2))
+barplot(test1$p_hat, main = "Original", col = "lightblue")
+barplot(test1$q_hat, main = "Perturbed", col = "coral")
 
 ```
 
+
+
 ### Exercise 2.1
 
-First we need to create a function that the Mean Integrated Squared Error (MISE) of a privatized histogram. The MISE is defined as
+To compare the two approximations we are instructed to use Mean Integrated Squared Error (MISE). The MISE is defined as
 
 $$
 \text{MISE}(\hat{p}, p) = \mathbb{E}\left[ \int_{0}^{1} (p(x) - \hat{p}(x))^2 \, \mathrm{d}x \right]
 $$
 
-where $\hat{p}(i)$ is the probability of the $i$th bin of the approximate histogram, and $p(i)$ is the probability of the $i$th bin of the original histogram.
+where $\hat{p}(i)$ is the probability of the $i$th bin of the approximate histogram, and $p(i)$ is the probability of the $i$th bin of the original histogram. Below is the function `mise` that takes the original and approximated PDFs as inputs, and returns MISE. And, below that is the function `sim_mise` where given the number of simulations (`S`), epsilon (`eps`), number of bins (`m`), and the true distrubution `rdist, ddist`; simulates data generation, perturbization, and the calculation of MISE scores. In the end, it returns the average MISE score. 
+
 
 ```{r}
-?integrate
 mise <- function(original, approx, start, end) {
   integrand <- function(x) (original(x) - approx(x))^2
   return(integrate(integrand, start, end, subdivisions = 1000, stop.on.error = FALSE)$value)
 }
-```
-
-
-Let's put the MISE function to work. We will try different values of $\epsilon$ and $m$. 
-Now, we bring everything together and try different values of $\epsilon$ and $m$.
-
-```{r}
 
 sim_mise <- function(S, eps, m, n, rdist, ddist) {
   # S: number of simulations
@@ -88,7 +92,7 @@ sim_mise <- function(S, eps, m, n, rdist, ddist) {
   # n: sample size
   # rdist: random distribution
   # ddist: true distribution
-  breaks <- (1:(m + 1) - 1) / m
+  breaks <- 0:m / m
 
   p_mises <- rep(NA, S)
   q_mises <- rep(NA, S)
@@ -103,34 +107,34 @@ sim_mise <- function(S, eps, m, n, rdist, ddist) {
   }
   return(list(p_mises = mean(p_mises), q_mises = mean(q_mises)))
 }
-
 ```
 
-Let's try different values of $n$, $\epsilon$ and $m$.
+
+Now, it is time to simulate the entire shebang. We are using the given grids for the parameters.
 
 ```{r}
-
-S <- 50 # number of simulations
+set.seed(123)
+S <- 1000 # We will change this to 1000 later
 n_grid <- c(100, 1000)
-eps_grid <- c(0.1)
+eps_grid <- c(0.1, 0.001)
 m_grid <- 1:10 * 5
 
-# create 3D array to store MISE scores
-A <- array(NA, dim = c(length(n_grid), length(eps_grid), length(m_grid)), dimnames = list(n_grid, eps_grid, m_grid))
-p_hat_mise <- A
-q_mise <- A
+# create data frame to store results
+scores <- data.frame(matrix(NA, nrow = length(n_grid) * length(eps_grid) * length(m_grid), ncol = 5))
+colnames(scores) <- c("n", "eps", "m", "p_mise", "q_mise")
 
 rdist <- function(n) rbeta(n, 10, 10)
 ddist <- function(x) dbeta(x, 10, 10)
 
 # loop over n_grid, eps_grid and m_grid
+i <- 1
 for (n in 1:length(n_grid)) {
   for (eps in 1:length(eps_grid)) {
     for (m in 1:length(m_grid)) {
       # compute MISE scores for p_hat and q
       res <- sim_mise(S, eps_grid[eps], m_grid[m], n_grid[n], rdist, ddist)
-      p_hat_mise[n, eps, m] <- res$p_mises
-      q_mise[n, eps, m] <- res$q_mises
+      scores[i, ] <- c(n_grid[n], eps_grid[eps], m_grid[m], res$p_mises, res$q_mises)
+      i <- i + 1
     }
   }
 }
@@ -141,11 +145,19 @@ Let's plot the MISE scores for $\hat{p}$ and $q$.
 
 ```{r}
 
-# plot MISE scores for p_hat, x axis: m
-plot(m_grid, p_hat_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for p_hat")
+library(ggplot2)
 
-# plot MISE scores for q, x axis: m
-plot(m_grid, q_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for q")
+# plot MISE scores for p_hat, with multiple lines for different pairs of n and eps
+ggplot(scores, aes(x = m, y = p_mise, color = paste(n, eps))) + 
+  geom_line() + 
+  scale_color_discrete(name = "n, eps") + 
+  labs(x = "Number of bins", y = "MISE", title = "MISE scores for p_hat")
+
+# plot MISE scores for q, with multiple lines for different pairs of n and eps
+ggplot(scores, aes(x = m, y = q_mise, color = paste(n, eps))) + 
+  geom_line() + 
+  scale_color_discrete(name = "n, eps") + 
+  labs(x = "Number of bins", y = "MISE", title = "MISE scores for q")
 
 ```
 
@@ -196,7 +208,7 @@ m_grid <- 1:10 * 5
 # create 3D array to store MISE scores
 A <- array(NA, dim = c(length(n_grid), length(eps_grid), length(m_grid)), dimnames = list(n_grid, eps_grid, m_grid))
 p_hat_mise <- A
-q_mise <- A
+q_hat_mise <- A
 
 # Distrubution parameters
 alphas <- c(2, 8)
@@ -206,8 +218,6 @@ probs <- c(0.5, 0.5)
 rdist <- function(n) rmbeta(n, alphas, betas, probs)
 ddist <- function(x) dbeta(x, alphas, betas, probs)
 
-sim_mise(S=2, eps_grid[1], m_grid[10], n_grid[2], rdist, ddist)
-
 # loop over n_grid, eps_grid and m_grid
 for (n in 1:length(n_grid)) {
   for (eps in 1:length(eps_grid)) {
@@ -215,7 +225,7 @@ for (n in 1:length(n_grid)) {
       # compute MISE scores for p_hat and q
       res <- sim_mise(S, eps_grid[eps], m_grid[m], n_grid[n], rdist, ddist)
       p_hat_mise[n, eps, m] <- res$p_mises
-      q_mise[n, eps, m] <- res$q_mises
+      q_hat_mise[n, eps, m] <- res$q_mises
     }
   }
 }
@@ -230,6 +240,6 @@ Let's plot the MISE scores for $\hat{p}$ and $q$.
 plot(m_grid, p_hat_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for p_hat")
 
 # plot MISE scores for q, x axis: m
-plot(m_grid, q_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for q")
+plot(m_grid, q_hat_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for q")
 
 ```
