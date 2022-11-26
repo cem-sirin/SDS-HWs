@@ -1,0 +1,235 @@
+
+---
+title: "Homework 1 for SDS, Fall 2022"
+author: "Cem Sirin & Vahid Ghanbarizadeh"
+date: "`r Sys.Date()`"
+---
+
+## Exercise 1: Stat4Race (2nd ed.)
+
+## Exercise 2: Mind your own biz. . .
+
+### Setting up the landscape
+
+We want to be sure that we have the necessary functions before we start answering the questions. We will apply the Perturbed Histogram (Dwork et al., 2006) to privatize the data. The idea is to divide the data into $m$ bins, and then add a random noise to each bin. The noise is drawn from a Laplace distribution with scale parameter $\frac{\epsilon}{n}$, where $\epsilon$ is the privacy budget. The following code implements the Perturbed Histogram algorithm.
+
+```{r}
+rlaplace <- function(n, mu = 0, b = 1) {
+  r <- runif(n, 0, 1)
+  r <- mu - b * sign(r - 0.5) * log(1 - 2 * abs(r - 0.5))
+  return(r)
+}
+
+perturb <- function(x, epsilon, breaks) {
+
+  h <- hist(x, breaks = breaks, plot = FALSE)
+  counts <- h$counts
+  p_hat <- h$density
+
+  # add noise to each bin
+  counts <- counts + rlaplace(length(counts), 0, 8 / epsilon^2)
+  # count 0 or max
+  counts[counts < 0] <- 0 
+  q_hat <- counts / sum(counts) * length(counts)
+
+  # return $p_hat and $q
+  return(list(p_hat = p_hat, q_hat = q_hat))
+}
+```
+
+```{r}
+
+ePDF <- function(x, hist_prob, breaks) {
+  # An m by n matrix to compare x with break points
+  breaks_matrix <- matrix(breaks, nrow = length(x), ncol = length(breaks), byrow = TRUE)
+
+  # An n-dimensional vector to store which bin each x falls into
+  bins <- rowSums(breaks_matrix < x)
+
+  # Assign the probability of each bin to the corresponding x
+  d <- hist_prob[bins]
+
+  # if x is outside the range of breaks, then d = 0
+  d[is.na(d)] <- 0 
+
+  return(d)
+}
+
+```
+
+### Exercise 2.1
+
+First we need to create a function that the Mean Integrated Squared Error (MISE) of a privatized histogram. The MISE is defined as
+
+$$
+\text{MISE}(\hat{p}, p) = \mathbb{E}\left[ \int_{0}^{1} (p(x) - \hat{p}(x))^2 \, \mathrm{d}x \right]
+$$
+
+where $\hat{p}(i)$ is the probability of the $i$th bin of the approximate histogram, and $p(i)$ is the probability of the $i$th bin of the original histogram.
+
+```{r}
+?integrate
+mise <- function(original, approx, start, end) {
+  integrand <- function(x) (original(x) - approx(x))^2
+  return(integrate(integrand, start, end, subdivisions = 1000, stop.on.error = FALSE)$value)
+}
+```
+
+
+Let's put the MISE function to work. We will try different values of $\epsilon$ and $m$. 
+Now, we bring everything together and try different values of $\epsilon$ and $m$.
+
+```{r}
+
+sim_mise <- function(S, eps, m, n, rdist, ddist) {
+  # S: number of simulations
+  # eps: epsilon
+  # m: number of bins
+  # n: sample size
+  # rdist: random distribution
+  # ddist: true distribution
+  breaks <- (1:(m + 1) - 1) / m
+
+  p_mises <- rep(NA, S)
+  q_mises <- rep(NA, S)
+  for (i in 1:S) {
+    # generate data
+    x <- rdist(n)
+    # get densities
+    res <- perturb(x, eps, breaks)
+    # compute MISE
+    p_mises[i] <- mise(ddist, function(x) ePDF(x, res$p_hat, breaks), 0, 1)
+    q_mises[i] <- mise(ddist, function(x) ePDF(x, res$q_hat, breaks), 0, 1)
+  }
+  return(list(p_mises = mean(p_mises), q_mises = mean(q_mises)))
+}
+
+```
+
+Let's try different values of $n$, $\epsilon$ and $m$.
+
+```{r}
+
+S <- 50 # number of simulations
+n_grid <- c(100, 1000)
+eps_grid <- c(0.1)
+m_grid <- 1:10 * 5
+
+# create 3D array to store MISE scores
+A <- array(NA, dim = c(length(n_grid), length(eps_grid), length(m_grid)), dimnames = list(n_grid, eps_grid, m_grid))
+p_hat_mise <- A
+q_mise <- A
+
+rdist <- function(n) rbeta(n, 10, 10)
+ddist <- function(x) dbeta(x, 10, 10)
+
+# loop over n_grid, eps_grid and m_grid
+for (n in 1:length(n_grid)) {
+  for (eps in 1:length(eps_grid)) {
+    for (m in 1:length(m_grid)) {
+      # compute MISE scores for p_hat and q
+      res <- sim_mise(S, eps_grid[eps], m_grid[m], n_grid[n], rdist, ddist)
+      p_hat_mise[n, eps, m] <- res$p_mises
+      q_mise[n, eps, m] <- res$q_mises
+    }
+  }
+}
+
+```
+
+Let's plot the MISE scores for $\hat{p}$ and $q$.
+
+```{r}
+
+# plot MISE scores for p_hat, x axis: m
+plot(m_grid, p_hat_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for p_hat")
+
+# plot MISE scores for q, x axis: m
+plot(m_grid, q_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for q")
+
+```
+
+### Mixed distrubution
+Let's plot a mixed beta distribution.
+
+```{r}
+rmbeta <- function(n, alphas, betas, probs) {
+  if (length(alphas) != length(betas) | length(alphas) != length(probs)) {
+    stop("alphas, betas and probs must have the same length")
+  }
+  # compute the density of a mixed beta distribution
+  z <- sample(1:length(alphas), n, replace = TRUE, prob = probs)
+ return(rbeta(n, alphas[z], betas[z]))
+}
+
+dmbeta <- function(x, alphas, betas, probs) {
+  if (length(alphas) != length(betas) | length(alphas) != length(probs)) {
+    stop("alphas, betas and probs must have the same length")
+  }
+  # compute the density of a mixed beta distribution
+  return(rowSums(t(t(sapply(1:length(alphas), function(i) dbeta(x, alphas[i], betas[i]))) * probs)))
+}
+
+
+
+alphas <- c(2, 8)
+betas <- c(8, 2)
+probs <- c(0.3, 0.7)
+
+
+# generate data
+x <- rmbeta(1000, alphas, betas, probs)
+# plot lightblue
+hist(x, breaks = 20, freq = FALSE, main = "Mixed beta distribution", col = "lightblue", xlim = c(0, 1))
+# add density
+curve(dmbeta(x, alphas, betas, probs), add = TRUE, col = "red")
+
+```
+
+```{r}
+
+S <- 2 # number of simulations
+n_grid <- c(100, 1000)
+eps_grid <- c(0.1)
+m_grid <- 1:10 * 5
+
+# create 3D array to store MISE scores
+A <- array(NA, dim = c(length(n_grid), length(eps_grid), length(m_grid)), dimnames = list(n_grid, eps_grid, m_grid))
+p_hat_mise <- A
+q_mise <- A
+
+# Distrubution parameters
+alphas <- c(2, 8)
+betas <- c(8, 2)
+probs <- c(0.5, 0.5)
+
+rdist <- function(n) rmbeta(n, alphas, betas, probs)
+ddist <- function(x) dbeta(x, alphas, betas, probs)
+
+sim_mise(S=2, eps_grid[1], m_grid[10], n_grid[2], rdist, ddist)
+
+# loop over n_grid, eps_grid and m_grid
+for (n in 1:length(n_grid)) {
+  for (eps in 1:length(eps_grid)) {
+    for (m in 1:length(m_grid)) {
+      # compute MISE scores for p_hat and q
+      res <- sim_mise(S, eps_grid[eps], m_grid[m], n_grid[n], rdist, ddist)
+      p_hat_mise[n, eps, m] <- res$p_mises
+      q_mise[n, eps, m] <- res$q_mises
+    }
+  }
+}
+
+```
+
+Let's plot the MISE scores for $\hat{p}$ and $q$.
+
+```{r}
+
+# plot MISE scores for p_hat, x axis: m
+plot(m_grid, p_hat_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for p_hat")
+
+# plot MISE scores for q, x axis: m
+plot(m_grid, q_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for q")
+
+```
