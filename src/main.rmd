@@ -114,10 +114,10 @@ Now, it is time to simulate the entire shebang. We are using the given grids for
 
 ```{r}
 set.seed(123)
-S <- 1000 # We will change this to 1000 later
+S <- 50 # We will change this to 1000 later
 n_grid <- c(100, 1000)
 eps_grid <- c(0.1, 0.001)
-m_grid <- 1:10 * 5
+m_grid <- 1:10 * 10
 
 # create data frame to store results
 scores <- data.frame(matrix(NA, nrow = length(n_grid) * length(eps_grid) * length(m_grid), ncol = 5))
@@ -146,6 +146,7 @@ Let's plot the MISE scores for $\hat{p}$ and $q$.
 ```{r}
 
 library(ggplot2)
+# TODO: plotting p_hat for diferent epsilons is stupid change that
 
 # plot MISE scores for p_hat, with multiple lines for different pairs of n and eps
 ggplot(scores, aes(x = m, y = p_mise, color = paste(n, eps))) + 
@@ -161,7 +162,7 @@ ggplot(scores, aes(x = m, y = q_mise, color = paste(n, eps))) +
 
 ```
 
-### Mixed distrubution
+### Exercise 2.2: Mixed distrubution
 Let's plot a mixed beta distribution.
 
 ```{r}
@@ -243,3 +244,41 @@ plot(m_grid, p_hat_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "
 plot(m_grid, q_hat_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for q")
 
 ```
+
+### Exercise 2.3: Thinking very hard...
+
+We have decided to export the number of steps taken by Cem from his iPhone. We would like Proffessor Brutti to give Cem some advice on running and maybe recommend him a new pair of running shoes since Brutti is has a deep knowledge of running shoes and Cem is quite slow. However, it is very dangerous for Brutti to know the number of steps taken by Cem since he might then extrapolate where Cem is running and set a trap for him, because Cem is quite annoying during lectures. 
+
+```{r}
+library(readr)
+daily_steps <- read_csv("../data/daily_steps.csv", 
+                        col_types = cols(date = col_date(format = "%Y-%m-%d"),
+                                         value = col_integer()))
+
+x <- daily_steps$value
+# Number of bins
+m      <- 20
+breaks <- (0:m / m) * (max(x) - min(x)) + min(x)
+
+# Let's see the distrubution
+hist(x, breaks=breaks, main="Cem's daily steps after his arrival in Rome",
+     col = 'wheat1')
+```
+
+Now we will perturb the data before Cem falls into a trap. We would like choose optimal tuning parameters. As we increase number of bins $m$ we gain information by knowing the sample distribution in more detail. However, we add more noise to the data, therefore we must optimize this trade-off. 
+
+Wasserman and Zhou (2010) suggests to choose $n^{0.5}$. In the previous section we can see that 10 bins attained the best score for $n=100$, and maybe speculate that 30 bins was also the best for $n=1000$. Since we have extracted Cem's data only after his arrival in Rome, that ammounts to 67 days. So we expect 7 or 8 bins will be the optimal number of bins. 
+
+```{r}
+eps <- 1
+res <- perturb(x, eps, breaks)
+
+# Two barplots side by side
+par(mfrow = c(1, 2))
+# The values of the bins
+barplot(res$p_hat, col = 'wheat1', main = 'Values of p-hat', space=0)
+barplot(res$q_hat, col = 'wheat2', main = 'Values of q-hat', space=0)
+```
+
+
+### Excercise 2.4: Proving $\epsilon$-privacy
