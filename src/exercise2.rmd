@@ -24,7 +24,7 @@ perturb <- function(x, epsilon, breaks) {
 
   h <- hist(x, breaks = breaks, plot = FALSE)
   counts <- h$counts
-  p_hat <- h$density
+  p_hat <- counts / sum(counts) * length(counts)
 
   # add noise to each bin
   counts <- counts + rlaplace(length(counts), 0, 8 / epsilon^2)
@@ -114,7 +114,7 @@ Now, it is time to simulate the entire shebang. We are using the given grids for
 
 ```{r}
 set.seed(123)
-S <- 50 # We will change this to 1000 later
+S <- 40 # We will change this to 1000 later
 n_grid <- c(100, 1000)
 eps_grid <- c(0.1, 0.001)
 m_grid <- 1:10 * 10
@@ -265,20 +265,106 @@ hist(x, breaks=breaks, main="Cem's daily steps after his arrival in Rome",
      col = 'wheat1')
 ```
 
-Now we will perturb the data before Cem falls into a trap. We would like choose optimal tuning parameters. As we increase number of bins $m$ we gain information by knowing the sample distribution in more detail. However, we add more noise to the data, therefore we must optimize this trade-off. 
+We will assume that Cem can take at most 27,000 steps in a day, and normalize our data between 0 and 1. Now we will perturb the data before Cem falls into a trap. We would like choose optimal tuning parameters. 
 
-Wasserman and Zhou (2010) suggests to choose $n^{0.5}$. In the previous section we can see that 10 bins attained the best score for $n=100$, and maybe speculate that 30 bins was also the best for $n=1000$. Since we have extracted Cem's data only after his arrival in Rome, that ammounts to 67 days. So we expect 7 or 8 bins will be the optimal number of bins. 
+As we increase number of bins $m$ we gain information by knowing the sample distribution in more detail. However, we add more noise to the data, therefore we must optimize this trade-off. 
+
+Wasserman and Zhou (2010) suggests to choose $n^{1/3}$ bins. In the previous section we can see that 5 bins attained the best score for $n=100$, and maybe speculate that 10 bins was also the best for $n=1000$. This makes their suggestion more believable. Since we have extracted Cem's data only after his arrival in Rome, that ammounts to 67 days. So we expect 4 bins to be the optimal number of bins. 
+
+They also suggest that the increase in $k$, i.e., the size of the private dataset we are going to hand over to Brutti, does not affect the differential privacy. So we will numerically test the relationship between the MISE score and $k$.
+
+Lastly, we find $\epsilon=0.4$ to be satisfactory for our privacy requirements. The real data will be at most $e^{0.4} \approx 1.5$ more likely than any of its neighbours. And, Rome is quite so Brutti has to cover a lot of ground to catch Cem. 
 
 ```{r}
-eps <- 1
-res <- perturb(x, eps, breaks)
 
+eps <- 0.4
+x <- daily_steps$value / 27000
+m <- 4
+breaks <- (0:m / m)
+
+res <- perturb(x, eps, breaks)
+res
 # Two barplots side by side
 par(mfrow = c(1, 2))
 # The values of the bins
 barplot(res$p_hat, col = 'wheat1', main = 'Values of p-hat', space=0)
 barplot(res$q_hat, col = 'wheat2', main = 'Values of q-hat', space=0)
+
+dq_hat <- function(x) ePDF(x, res$q_hat, breaks)
+
+# To sample from the distrubution of q-hat, we will use
+# twice uniform sampling method, which i don't remember the name of.
+rq_hat <- function(n, pmf) {
+  u1 <- runif(n) # which bin does it belong to?
+  u2 <- runif(n) # The value that it will inside the bin
+  m <- length(pmf)
+
+  bmatrix <- matrix(cumsum(pmf) / m, 
+                    nrow = n, ncol = m, byrow = TRUE)
+
+  bins <- rowSums(u1 > bmatrix)
+  bins / m + u2 / m
+}
+
+z <- rq_hat(1000, res$q_hat)
+
+breaksZ <- (0:20 / 20)
+# Let's see the distrubution
+par(mfrow = c(1, 2))
+hist(x, breaks=breaksZ, main="Cem's daily steps after his arrival in Rome",
+     col = 'cornsilk')
+hist(z, breaks=breaksZ, main="Cem's privaized daily steps after his arrival in Rome",
+     col = 'lightblue')
+
 ```
 
+Now let's see how similar is summary statistics of the original data and the perturbed data, for different values of $k$.
+
+```{r}
+M <- 1000
+k <- c(100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000)
+
+meanX <- mean(x)
+sdX <- sd(x)
+
+mean_diff <- array(NA, length(k), dimnames = list(k))
+sd_diff   <- array(NA, length(k), dimnames = list(k))
+
+for (i in 1:length(k)) {
+  mean_diff[i] <- mean(replicate(M, (mean(rq_hat(k[i])) - meanX)^2))
+  sd_diff[i]   <- mean(replicate(M, (sd(rq_hat(k[i])) - sdX)^2))
+}
+
+par(mfrow = c(1, 2))
+plot(k, mean_diff, type = "l", xlab = "k", ylab = "Mean difference", main = "MSE of difference in means")
+plot(k, sd_diff, type = "l", xlab = "k", ylab = "SD difference", main = "MSE of difference in SDs")
+
+```
+
+Our simulations show after that $k=1000$ the MSE for the mean does not improve, and after $k=500$ the MSE for the SD does not improve. So we do not see any advantage in increasing $k$ beyond 1000, therefore we will use $k=1000$.
 
 ### Excercise 2.4: Proving $\epsilon$-privacy
+
+We will prove that the Perturbed Histogram satisfies $\epsilon$-differential privacy by simulating the algorithm with different values of $\epsilon$ and comparing the results. 
+
+```{r}
+eps_grid <- c(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+n <- 1000
+m <- n^(1/3)
+breaks <- (0:m / m)
+
+# Generate the data
+x  <- runif(n)
+# Neighbouring data
+xx <- x
+xx[which(x == min(x))] <- 0.999999
+
+
+# Perturb the data
+for (eps in eps_grid) {
+  res <- perturb(x, eps, breaks)
+  z <- rq_hat(1000, res$q_hat)
+
+}
+
+```
