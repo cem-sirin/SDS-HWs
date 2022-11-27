@@ -1,0 +1,12 @@
+
+---
+title: "Homework 1 for SDS, Fall 2022"
+author: "Cem Sirin & Vahid Ghanbarizadeh"
+date: "`r Sys.Date()`"
+---
+
+## Exercise 1: Stat4Race (2nd ed.)
+
+the shortcut for textwrap in vscode is
+
+Process: suppose that $X \sim \text{Unif}(0,1)$ and suppose we draw $\{Y_1, Y_2, Y_3, \ldots\} from yet another $\text{Unif}(0,1)$ until we reach $T$ such that $Y_T \leq X$. What is the distribution of $T$?
