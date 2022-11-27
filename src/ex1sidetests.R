@@ -14,36 +14,26 @@ joe <-  function(x, ncols) {
     res
 }
 
-M <- 10^4
-ncols <- 5
+set.seed(123)
+M <- 10^6
+ncols <- 8
 xx <- runif(M)
 res <- rep(NA, M)
 
 # find the first true for each row
 i <- 0
-while (any(is.na(res)) && i < 1000) {
+while (any(is.na(res))) {
     na_idx <- which(is.na(res))
     y <- matrix(runif(length(na_idx) * ncols), nrow = length(na_idx))
     x <- xx[na_idx]
     res[na_idx] <- joe(y < x, ncols) + i * ncols
     i <- i + 1
+    ncols <- ncols * 2
 }
 
+sum(is.na(res))
 end <- Sys.time()
 end - beg
 
 ########################
-sum(is.na(res))
-mean(res)
-
-i <- 0
-print(i)
-na_idx <- which(is.na(res))
-y <- matrix(runif(length(na_idx) * ncols), nrow = length(na_idx))
-x <- x[na_idx]
-res[na_idx] <- joe(y < x, ncols) + i * ncols
-i <- i + 1
-i
-res
-res[is.na(res)]
 
