@@ -9,4 +9,19 @@ date: "`r Sys.Date()`"
 
 the shortcut for textwrap in vscode is
 
-Process: suppose that $X \sim \text{Unif}(0,1)$ and suppose we draw $\{Y_1, Y_2, Y_3, \ldots\} from yet another $\text{Unif}(0,1)$ until we reach $T$ such that $Y_T \leq X$. What is the distribution of $T$?
+Process: suppose that $X \sim \text{Unif}(0,1)$ and suppose we draw $\{Y_1, Y_2, Y_3, \ldots\} from yet another $\text{Unif}(0,1)$ until we reach $T$ such that $Y_T \leq X$. We know the PMF of $T$ is $P(T = t) = \frac{1}{t(t+1)} for $t \in \{1,2,3,\ldots\}$. Simulate the process inspect the relationship between the simulation size and approximation error.
+
+```{r}
+
+library(quantstrat)
+install.packages("quantstrat")
+set.seed(123)
+M <- 10
+width <- 3
+X <- runif(M)
+X
+
+Y <- matrix(runif(M*width), ncol = width)
+Y
+
+```
