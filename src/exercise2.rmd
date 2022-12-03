@@ -1,7 +1,7 @@
 
 ---
 title: "Homework 1 for SDS, Fall 2022"
-author: "Cem Sirin & Vahid Ghanbarizadeh"
+author: "Cem Sirin & Sophia Balestrucci & Vahid Ghanbarizadeh"
 date: "`r Sys.Date()`"
 ---
 
@@ -57,13 +57,12 @@ To test the functions, let's generate a random sample from a uniform distributio
 
 ```{r}
 set.seed(123)
-
 test1 <- perturb(runif(1000), 0.5, 0:10 / 10)
+
 # Two barplots side by side
 par(mfrow = c(1, 2))
 barplot(test1$p_hat, main = "Original", col = "lightblue")
 barplot(test1$q_hat, main = "Perturbed", col = "coral")
-
 ```
 
 
@@ -114,10 +113,10 @@ Now, it is time to simulate the entire shebang. We are using the given grids for
 
 ```{r}
 set.seed(123)
-S <- 40 # We will change this to 1000 later
+S <- 2 # We will change this to 1000 later
 n_grid <- c(100, 1000)
 eps_grid <- c(0.1, 0.001)
-m_grid <- 1:10 * 10
+m_grid <- 1:5 * 10
 
 # create data frame to store results
 scores <- data.frame(matrix(NA, nrow = length(n_grid) * length(eps_grid) * length(m_grid), ncol = 5))
@@ -144,7 +143,6 @@ for (n in 1:length(n_grid)) {
 Let's plot the MISE scores for $\hat{p}$ and $q$.
 
 ```{r}
-
 library(ggplot2)
 # TODO: plotting p_hat for diferent epsilons is stupid change that
 
@@ -158,7 +156,7 @@ ggplot(scores, aes(x = m, y = p_mise, color = paste(n, eps))) +
 ggplot(scores, aes(x = m, y = q_mise, color = paste(n, eps))) + 
   geom_line() + 
   scale_color_discrete(name = "n, eps") + 
-  labs(x = "Number of bins", y = "MISE", title = "MISE scores for q")
+  labs(x = "Number of bins", y = "MISE", title = "MISE scores for q_hat")
 
 ```
 
@@ -196,20 +194,17 @@ x <- rmbeta(1000, alphas, betas, probs)
 hist(x, breaks = 20, freq = FALSE, main = "Mixed beta distribution", col = "lightblue", xlim = c(0, 1))
 # add density
 curve(dmbeta(x, alphas, betas, probs), add = TRUE, col = "red")
-
 ```
 
 ```{r}
-
-S <- 2 # number of simulations
+S <- 5 # number of simulations
 n_grid <- c(100, 1000)
 eps_grid <- c(0.1)
-m_grid <- 1:10 * 5
+m_grid <- 1:5 * 10
 
-# create 3D array to store MISE scores
-A <- array(NA, dim = c(length(n_grid), length(eps_grid), length(m_grid)), dimnames = list(n_grid, eps_grid, m_grid))
-p_hat_mise <- A
-q_hat_mise <- A
+# create data frame to store results
+scores <- data.frame(matrix(NA, nrow = length(n_grid) * length(eps_grid) * length(m_grid), ncol = 5))
+colnames(scores) <- c("n", "eps", "m", "p_mise", "q_mise")
 
 # Distrubution parameters
 alphas <- c(2, 8)
@@ -220,28 +215,34 @@ rdist <- function(n) rmbeta(n, alphas, betas, probs)
 ddist <- function(x) dbeta(x, alphas, betas, probs)
 
 # loop over n_grid, eps_grid and m_grid
+i <- 1
 for (n in 1:length(n_grid)) {
   for (eps in 1:length(eps_grid)) {
     for (m in 1:length(m_grid)) {
       # compute MISE scores for p_hat and q
       res <- sim_mise(S, eps_grid[eps], m_grid[m], n_grid[n], rdist, ddist)
-      p_hat_mise[n, eps, m] <- res$p_mises
-      q_hat_mise[n, eps, m] <- res$q_mises
+      scores[i, ] <- c(n_grid[n], eps_grid[eps], m_grid[m], res$p_mises, res$q_mises)
+      i <- i + 1
     }
   }
 }
-
 ```
 
-Let's plot the MISE scores for $\hat{p}$ and $q$.
+Let's plot the MISE scores for $\hat{p}$ and $\hat{q}$.
 
 ```{r}
 
 # plot MISE scores for p_hat, x axis: m
-plot(m_grid, p_hat_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for p_hat")
+ggplot(scores, aes(x = m, y = p_mise, color = paste(n, eps))) + 
+  geom_line() + 
+  scale_color_discrete(name = "n, eps") + 
+  labs(x = "Number of bins", y = "MISE", title = "MISE scores for p_hat")
 
 # plot MISE scores for q, x axis: m
-plot(m_grid, q_hat_mise[1, 1, ], type = "l", xlab = "m", ylab = "MISE", main = "MISE scores for q")
+ggplot(scores, aes(x = m, y = q_mise, color = paste(n, eps))) + 
+  geom_line() + 
+  scale_color_discrete(name = "n, eps") + 
+  labs(x = "Number of bins", y = "MISE", title = "MISE scores for q_hat")
 
 ```
 
@@ -276,7 +277,6 @@ They also suggest that the increase in $k$, i.e., the size of the private datase
 Lastly, we find $\epsilon=0.4$ to be satisfactory for our privacy requirements. The real data will be at most $e^{0.4} \approx 1.5$ more likely than any of its neighbours. And, Rome is quite so Brutti has to cover a lot of ground to catch Cem. 
 
 ```{r}
-
 eps <- 0.4
 x <- daily_steps$value / 27000
 m <- 4
@@ -321,23 +321,23 @@ hist(z, breaks=breaksZ, main="Cem's privaized daily steps after his arrival in R
 Now let's see how similar is summary statistics of the original data and the perturbed data, for different values of $k$.
 
 ```{r}
-M <- 1000
-k <- c(100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000)
+M <- 10
+k_grid <- c(100, 250, 500, 1000, 2500, 5000, 10000, 25000, 50000, 100000)
 
 meanX <- mean(x)
 sdX <- sd(x)
 
-mean_diff <- array(NA, length(k), dimnames = list(k))
-sd_diff   <- array(NA, length(k), dimnames = list(k))
+mean_diff <- array(NA, length(k_grid), dimnames = list(k_grid))
+sd_diff   <- array(NA, length(k_grid), dimnames = list(k_grid))
 
-for (i in 1:length(k)) {
-  mean_diff[i] <- mean(replicate(M, (mean(rq_hat(k[i])) - meanX)^2))
-  sd_diff[i]   <- mean(replicate(M, (sd(rq_hat(k[i])) - sdX)^2))
+for (i in 1:length(k_grid)) {
+  mean_diff[i] <- mean(replicate(M, (mean(rq_hat(k_grid[i], res$q_hat)) - meanX)^2))
+  sd_diff[i]   <- mean(replicate(M, (sd(rq_hat(k_grid[i], res$q_hat)) - sdX)^2))
 }
 
 par(mfrow = c(1, 2))
-plot(k, mean_diff, type = "l", xlab = "k", ylab = "Mean difference", main = "MSE of difference in means")
-plot(k, sd_diff, type = "l", xlab = "k", ylab = "SD difference", main = "MSE of difference in SDs")
+plot(k_grid, mean_diff, type = "l", xlab = "k", ylab = "Mean difference", main = "MSE of difference in means")
+plot(k_grid, sd_diff, type = "l", xlab = "k", ylab = "SD difference", main = "MSE of difference in SDs")
 
 ```
 
@@ -355,7 +355,8 @@ breaks <- (0:m / m)
 
 # Generate the data
 x  <- runif(n)
-# Neighbouring data
+
+# Neighboring data
 xx <- x
 xx[which(x == min(x))] <- 0.999999
 

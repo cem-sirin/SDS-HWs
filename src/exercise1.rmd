@@ -1,12 +1,209 @@
 
 ---
 title: "Homework 1 for SDS, Fall 2022"
-author: "Cem Sirin & Vahid Ghanbarizadeh"
+author: "Cem Sirin & Sophia Balestrucci & Vahid Ghanbarizadeh"
 date: "`r Sys.Date()`"
 ---
 
 ## Exercise 1: Stat4Race (2nd ed.)
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+```
 
-the shortcut for textwrap in vscode is
+Process: suppose that $X \sim \text{Unif}(0,1)$ and suppose we draw $\{Y_1, Y_2, Y_3, \ldots\}$ from yet another $\text{Unif}(0,1)$ until we reach $T$ such that $Y_T \leq X$. What is the distribution of $T$?
 
-Process: suppose that $X \sim \text{Unif}(0,1)$ and suppose we draw $\{Y_1, Y_2, Y_3, \ldots\} from yet another $\text{Unif}(0,1)$ until we reach $T$ such that $Y_T \leq X$. What is the distribution of $T$?
+The table of results for the running time of our code on Google Colab is as follows:
+
+| M  | $10^2$ | $10^3$ | $10^4$ | $10^5$ | $10^6$ | $10^7$ |
+|----|--------|--------|--------|--------|--------|--------|
+|secs|0.021855|0.026689|0.028478|0.078611|0.932537|10.64803|
+
+
+We added our R-code in the appendix which you can find it at the end of this document. Here is a more reader friendly pseudo-code for our algorithm:
+
+    M = Large
+    X = M-dimensional unif(0,1)
+    T = M-dimensional NA
+
+    nrows = M
+    ncols = λ
+    
+    while exists NA values in T:
+        Y = [nrows x ncols]-dimensional runif(0,1)
+        T[T is NA] = firstcross(Y < X)
+
+        nrows = number of NA values in T
+        ncols = ncolss * 2
+
+where $\lambda$ is tuning parameter to initialize the number of $Y$ generated. The `firstcross` function returns the first index of the first row of `Y` that is lesser than `X`, and if there are no such rows, it returns `NA`. Therefore, we only generate $Y$ for the rows of $T$ that are still `NA`. Another, cool part of this algorithm is that it generates more and more $Y$ as it iterates, since the `NA` values in $T$ correspond to very small $X$ values, and it is better to generate bigger batches of $Y$ for these small $X$ values. Here is the code:
+
+```{r Simulating T, echo=FALSE}
+firstcrosss <-  function(x) {
+    # x: a matrix of boolean values
+    Z  <- which(x)
+    n  <- nrow(x)
+    m  <- ncol(x)
+
+    # Ys crossing which X
+    crossx   <- (Z - 1) %% n + 1
+
+    # Which Y's crossing
+    crossy   <- (1:m)[ceiling(Z / n)]
+
+    # index of first crossing
+    idx <- which(!(duplicated(crossx)))
+
+    # na vector
+    res <- rep(NA, n)
+    res[crossx[idx]] <- crossy[idx]
+    res
+}
+
+set.seed(123)
+M_grid <- c(10^2, 10^3, 10^4, 10^5, 10^6, 10^7)
+M_grid <- c(10^2, 10^3, 10^4, 10^5, 10^6)
+#M_grid <- c(10^2)
+lambda <- 8
+
+# dataframe to store the first 50 pmf approximations for M-grid
+toprows <- 20
+pmfs <- data.frame(matrix(NA, nrow = toprows, ncol = length(M_grid)))
+colnames(pmfs) <- c('M1', 'M2', 'M3', 'M4', 'M5')
+
+i <- 1
+for (M in M_grid) {
+    start <- Sys.time()
+    X <- runif(M)
+    t <- rep(NA, M)
+
+    ncols <- lambda
+
+    s <- 0
+    while (any(is.na(t))) {
+        nidx    <- which(is.na(t))
+        nrows   <- length(nidx)
+        Y       <- matrix(runif(nrows * ncols), nrow = nrows)
+        XX      <- X[nidx]
+        t[nidx] <- firstcrosss(Y < XX) + s
+        s     <- s + ncols
+        ncols <- ncols * 2
+    }
+
+   #print(paste0("M = ", M, " took ", round(Sys.time() - start, 3), " seconds"))
+    pmfs[paste0("M", i)] <- table(t)[1:toprows] / M
+    i <- i + 1
+}
+
+# fill NA with 0
+pmfs[is.na(pmfs)] <- 0
+```
+
+Now we can plot the PMF approximations for $M = 10^2, 10^3, 10^4, 10^5, 10^6, 10^7$:
+
+```{r Plotting Errors, warning=FALSE}
+library(ggplot2)
+library("tidyverse")
+errors <- data.frame(matrix(NA, nrow = toprows, ncol = length(M_grid)))
+colnames(errors) <- c('10e2', '10e3', '10e4', '10e5', '10e6')
+
+for (i in 1:5) {
+    errors[,i] <- abs(pmfs[,i] - 1 / (1:toprows * (1:toprows + 1)))
+}
+
+errors$t <- 1:toprows
+errors %>% gather(key = "M", value = "error", -t) %>% 
+  ggplot(aes(x=t, y=error)) + 
+    geom_line(aes(color = M)) + 
+    scale_color_discrete(name = "M") +
+    labs(title = "L1 Errors of the PMF approximations",
+         x = "t", y = "error")
+```
+
+In the plot above we can observe that the absolute error of the PMF approximations decreases as $M$ increases. This is expected since the PMF approximations are more accurate as $M$ increases. We also observe that the error decreases as $t$ increases. This is also expected since the error is the difference between the true PMF and the approximation, and the true PMF is decreasing in t, therefore the magnitude of the error decreases as $t$ increases. To inspect the error more closely in higher values of $t$, we can plot the ratio of the error to the true PMF:
+
+```{r Plotting Ratio of Error to True PMF, warning=FALSE}
+errors <- data.frame(matrix(NA, nrow = toprows, ncol = length(M_grid)))
+colnames(errors) <- c('10e2', '10e3', '10e4', '10e5', '10e6')
+
+for (i in 1:5) {
+    true <- 1 / (1:toprows * (1:toprows + 1))
+    errors[,i] <- abs(pmfs[,i] - true) / true
+}
+
+errors$t <- 1:toprows
+errors %>% gather(key = "M", value = "error", -t) %>% 
+  ggplot(aes(x=t, y=error)) + 
+    geom_line(aes(color = M)) + 
+    scale_color_discrete(name = "M") +
+    labs(title = "Ratio of the L1 Errors of the PMF approximations to the True PMF",
+         x = "t", y = "error")
+```
+
+Just to state the obvious, the ratio of error is decreasing with $M$. However, more interestingly, the ratio of error is somewhat increasing with $t$. This is because it becomes harder to have enough samples to represent $t$s with lower frequency. 
+
+## Appendix 1: R-code for simulating Exercise 1
+
+We have hidden this chunk above for better readability. Here is what was going on there:
+
+```{r Appendix, eval=FALSE}
+firstcrosss <-  function(x) {
+    # x: a matrix of boolean values
+    Z  <- which(x)
+    n  <- nrow(x)
+    m  <- ncol(x)
+
+    # Ys crossing which X
+    crossx   <- (Z - 1) %% n + 1
+
+    # Which Y's crossing
+    crossy   <- (1:m)[ceiling(Z / n)]
+
+    # index of first crossing
+    idx <- which(!(duplicated(crossx)))
+
+    # na vector
+    res <- rep(NA, n)
+    res[crossx[idx]] <- crossy[idx]
+    res
+}
+
+set.seed(123)
+M_grid <- c(10^2, 10^3, 10^4, 10^5, 10^6, 10^7)
+M_grid <- c(10^2, 10^3, 10^4, 10^5, 10^6)
+lambda <- 8
+
+# dataframe to store the first 50 pmf approximations for M-grid
+toprows <- 20
+pmfs <- data.frame(matrix(NA, nrow = toprows, ncol = length(M_grid)))
+colnames(pmfs) <- c('M1', 'M2', 'M3', 'M4', 'M5')
+
+i <- 1
+for (M in M_grid) {
+    start <- Sys.time()
+    X <- runif(M)
+    t <- rep(NA, M)
+
+    ncols <- lambda
+
+    s <- 0
+    while (any(is.na(t))) {
+        nidx    <- which(is.na(t))
+        nrows   <- length(nidx)
+        Y       <- matrix(runif(nrows * ncols), nrow = nrows)
+        XX      <- X[nidx]
+        t[nidx] <- firstcrosss(Y < XX) + s
+        s     <- s + ncols
+        ncols <- ncols * 2
+    }
+
+   #print(paste0("M = ", M, " took ", round(Sys.time() - start, 3), " seconds"))
+    pmfs[paste0("M", i)] <- table(t)[1:toprows] / M
+    i <- i + 1
+}
+
+# fill NA with 0
+pmfs[is.na(pmfs)] <- 0
+```
+
+
+
