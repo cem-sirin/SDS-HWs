@@ -204,6 +204,3 @@ for (M in M_grid) {
 # fill NA with 0
 pmfs[is.na(pmfs)] <- 0
 ```
-
-
-
