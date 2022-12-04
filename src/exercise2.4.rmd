@@ -1,0 +1,62 @@
+
+---
+title: "Homework 1 for SDS, Fall 2022"
+author: "Cem Şirin & Sophia Balestrucci & Vahid Ghanbarizadeh"
+date: "`r Sys.Date()`"
+---
+
+## Exercise 2: Mind your own biz. . .
+
+### Excercise 2.4: Proving $\epsilon$-privacy
+
+We will prove that the Perturbed Histogram satisfies $\epsilon$-differential privacy by simulating the algorithm with different values of $\epsilon$ and comparing the results. 
+
+Now, differential privacy is defined on worst case definition. Let's revisit the definition of differential privacy. For any neighbouring datasets $\mathcal{D}_n=\left\{X_1, \ldots, X_{i-1}, X_i, X_{i+1}, \ldots, X_n\right\}$ and $\mathcal{D}_n^{\prime}=\left\{X_1, \ldots, X_{i-1}, X_i^{\prime}, X_{i+1}, \ldots, X_n\right\}$, we say that the data release mechanism $\mathcal{Q}_n(\cdot)$ satisfies $\epsilon$-differential privacy if for any two neighbouring datasets $\mathcal{D}_n$ and $\mathcal{D}_n^{\prime}$, we have
+
+$$
+\sup_{z \in \mathcal{Z}} \frac{\mathcal{Q}_n(z \mid \mathcal{D}_n)}{\mathcal{Q}_n(z \mid \mathcal{D}_n^{\prime})} \leq e^{\epsilon}
+$$
+
+where $\mathcal{Z}$ is the set of all possible outputs of the data release mechanism $\mathcal{Q}_n(\cdot)$. We will assume $\mathcal{X} = [0, 1]$ and $\mathcal{Z} = [0, 1]$. To start with a simple case, say that $\mathcal{D} = \{a\}, \mathcal{D}^{\prime} = \{b\}$, and the privitazed dataset $Z$ has size of $k=1$, that is, $z_1$. Then, we have
+
+$$
+\sup_{z_1 \in \mathcal{Z}} \frac{q_{\epsilon, m}(z_1 \mid \mathcal{D})}{q_{\epsilon, m}(z_1 \mid \mathcal{D}^{\prime})} = \sum_j^m \frac{q_j(\mathcal{D_n})}{q_j(\mathcal{D_n}')} \mathbb{1}(z_1 \in B_j)
+$$
+
+where $B_j$ is the $j$-th bin of the histogram. We can maximize this expression by choosing $z_1$ in the same bin as $a$ and different bin than $b$. Say that the bin of $a$ is $l$ and the bin of $b$ is $l^{\prime}$. This will result in the following expression
+
+$$
+\frac{\max(0,1 + \nu_l)}{\max(0,1 + \nu_l) + \sum_{j \neq l}^m \max(0, \nu_j)} \cdot \frac{\max(0,1 + \nu_{l^{\prime}}) + \sum_{j \neq l'}^m \max(0, \nu_j)}{\max(0,\nu_l)}
+$$
+
+if $m$ very large, the expression is approximately
+
+$$
+\frac{\max(0,1 + \nu_l)}{\max(0,\nu_l)}.
+$$
+
+We are not sure what to do at this point, but we observe the behavior of the expression for $\nu_l > 0$. To find the PDF of this expression (say $\zeta$) we derrive it as
+
+$$
+\begin{aligned}
+\zeta &= \frac{1 + \nu_l}{\nu_l} \\
+\nu_l &= \frac{1}{\zeta - 1} \\
+\frac{\partial \nu_l}{\partial \zeta} &= - \frac{1}{(\zeta - 1)^2} \\
+f_{\zeta}(\zeta) &= f_{\nu_l}\left(\frac{1}{\zeta - 1}\right )\frac{1}{(\zeta - 1)^2} \\
+&= \frac{1}{2 \cdot (4 / \epsilon)} \cdot \exp\left(-\frac{\mid\frac{1}{\zeta - 1}\mid}{4 / \epsilon}\right) \cdot \frac{1}{(\zeta - 1)^2} \\
+&= \frac{\epsilon}{8(\zeta - 1)^2} \cdot \exp\left(-\frac{\epsilon}{4\mid\zeta-1\mid}\right)
+\end{aligned}
+$$
+
+Let's try plotting this maybe?
+
+```{r}
+
+dzeta <- function(x, eps) {
+    eps / (8 * (x - 1)^2) * exp(-eps / (4 * abs(x - 1)))
+}
+
+eps <- 1
+curve(dzeta(x, eps), from = 0, to = 2, n = 1000, col = "red", lwd = 2, xlab = expression(zeta), ylab = expression(f(zeta)))
+
+```

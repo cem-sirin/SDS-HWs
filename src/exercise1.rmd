@@ -3,6 +3,9 @@
 title: "Homework 1 for SDS, Fall 2022"
 author: "Cem Sirin & Sophia Balestrucci & Vahid Ghanbarizadeh"
 date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
 ---
 
 ## Exercise 1: Stat4Race (2nd ed.)
