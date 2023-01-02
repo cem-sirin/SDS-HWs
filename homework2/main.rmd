@@ -1,0 +1,46 @@
+
+---
+title: "Homework 2 for SDS, Fall 2022"
+author: "Cem Sirin & Sophia Balestrucci & Vahid Ghanbarizadeh"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: false
+    toc_depth: 3
+---
+
+## Task 1: Pooling Subjects
+
+Our first task is to pool the data for the two subject groups. The fMRI data that we have contains time series for each subject and each Region of Interest (ROI). We are interested in estimating the correlation between ROIs. Our first approach is to estimate the correlation between ROIs for each subject and then average the correlations across subjects. Our reasoning is that
+
+a. The subjects may not be synchronized in time with regards to the cognitive or motor task that they are performing. Therefore, we believe that estimating the correlation per subject and then averaging the correlations across subjects is more robust. 
+b. Moreover, a neural activity causes a *hemodynamic response function* (HRF) which is a time-varying function that affects the blood oxygen levels. The HRF is not synchronized across subjects. Therefore, we believe that pooling the data across subjects is more robust.
+
+When it comes to processing the data of an individual, we would like to address a couple issues. First of all, we are dealing with **Pearson correlation**, which means that methods such as demeaning or standardizing the data will not affect the correlation. 
+
+## Task 2: Estimating the Correlation Matrix
+
+Now, let's exactly do what we have described above.
+
+```{r}
+# Load the data
+load("hw2_data.RData")
+
+# Get the correlation matrix for each subject
+R.asd <- lapply(asd_sel, cor)
+R.td  <- lapply(td_sel,  cor)
+
+# Average the correlation matrices across subjects
+R.asd.mean <- matrix(0, nrow = 116, ncol = 116)
+R.td.mean  <- matrix(0, nrow = 116, ncol = 116)
+
+for (r in R.asd) R.asd.mean <- R.asd.mean + r
+for (r in R.td)  R.td.mean  <- R.td.mean  + r
+
+R.asd.mean <- R.asd.mean / length(R.asd)
+R.td.mean  <- R.td.mean  / length(R.td)
+
+
+```
