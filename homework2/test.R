@@ -3,6 +3,10 @@ getwd() # this is you're current wd
 
 library(dplyr)
 load("hw2_data.RData")
+load("neuro.aal.rda")
+neuro.aal <- levels(neuro.aal$desc$label)
+superregion <- sapply(neuro.aal, function(x) strsplit(x, "_")[[1]][1])
+superregion
 
 R.asd <- lapply(asd_sel, cor)
 R.td  <- lapply(td_sel, cor)
@@ -26,6 +30,7 @@ R.td.mean <- R.td.mean / length(R.td)
 sum(abs(R.asd.mean) > 0.5)
 sum(abs(R.td.mean)  > 0.5)
 
+neuro.aal$desc
 
-tanh(R.td.mean)
-
+asd_sel <- lapply(asd_sel, function(x) scale(as.data.frame(x)))
+d <- Reduce()
