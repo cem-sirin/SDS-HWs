@@ -12,8 +12,6 @@ d <- asd$caltech_0051472
 d <- asd$trinity_0050234
 
 
-asd
-
 
 
 # Correlation assuming 0 mean

@@ -13,15 +13,44 @@ output:
 
 ## Task 1: Pooling Subjects
 
-Our first objective is to pool the data for the two subject groups. The fMRI data that we have contains time series for each subject and each Region of Interest (ROI). We are interested in estimating the correlation between ROIs. To do so, we will introduce our assumptions and their justifications.
+Our first objective is to pool the data for the two subject groups. The preprocessed fMRI data that we have contains time series for each subject and each Region of Interest (ROI). We are interested in estimating the correlation between ROIs. To do so, we will introduce features of the data, our assumptions, and the pooling procedure.
 
-1. For a given subject, the time series of the ROIs are independent and identically distributed (i.i.d.) with regards to time.
-2. The fMRI data measures the change in the blood oxygen levels. Biologically, it is not possible for the blood oxygen levels to have an increasing/decreasing trend. Therefore, we assume that the mean is zero for each ROI.
-3. The subjects vary in terms of biological and cognitive factors. Therefore, we assume that the variance is different for each ROI-subject pair. However, we will assume that the correlation between the ROIs is the same for each subject.
-4. The subjects are independent of each other.
+### *Features of the Data*
 
-Based on these assumptions, we willl pool the data in the following way. First, we will standardize each ROI-subject pair by dividing by the standard deviation that is estimated assuming zero mean. Then, we can simply pool the data that will result in a matrix of size $1740 \times 116$.
-  
+The data is obtained from the Autism Brain Imaging Data Exchange (ABIDE) initiative and is already preprocessed. The ABIDE 1 dataset is formed by an international collaboration of researchers from 17 different institutions. Each insutution has a unique scanning procedure. In our case, our dataset is confined to data from California Institute of Technology (Caltech) and Trinity Centre for Health Sciences (Trinity). While screenings from Trinity are task based, Caltech is resting state. 
+
+### *Assumptions*
+
+In the light of the features of the data, and the objective of the analysis, we will make the following assumptions:
+
+1. For a given subject, the time series of the ROIs are independent and identically distributed (i.i.d.) with regards to time. This assumption is given by the assignment prompt, so we must *abide* by it. See the word play :D?
+2. The fMRI data measures the change in the blood oxygen levels. In the long run, biologically, it is not possible for the blood oxygen levels to have an increasing/decreasing trend. In the short run, even if there is a detectable trend in the course of the experiment, then it conflicts with the assumption of time invariance. Moreover, as we have explained in the previous section, the dataset is not uniform in terms of experiment process so time dependent estimations are not a good idea. Therefore, we assume that the mean is zero for each ROI-subject pair.
+3. The subjects vary in terms of biological and cognitive factors. Moreover, the labs also have varying factors. Therefore, we assume that the variance is different for each ROI-subject-Lab triplet. However, we will assume that the correlation between the ROIs is the same for each subject-Lab pair, as it is pretty much necessary for the analysis.
+4. The subjects are independent of each other. The labs are also independent of each other. Also, the labs and the subjects are mutually independent.
+
+### *Pooling Procedure*
+
+Based on these assumptions, we willl pool the data in the following way. First, we will standardize each ROI-subject pair by dividing by the standard deviation that is estimated assuming zero mean. Then, we can simply pool the data that will result in a matrix of size $1740 \times 116$. Our model resembles the following:
+
+$$
+\Delta Y_{i,j,k} = \epsilon_{i,j,k}
+$$
+
+where $i$ is the subject, $j$ is the ROI, and $k$ is the lab. $\Delta Y_{i,j,k}$ is the time series of the $j$th ROI for the $i$th subject from the $k$th lab. $\epsilon_{i,j,k}$ is the error term. Let $\sigma_{i,j,k}^2$ be the variance of the error term. The the correlation of $\Delta Y_{i,j,k}$ and $\Delta Y_{i',j',k'}$ is given by:
+
+$$
+\begin{align}
+\mathrm{corr}(\Delta Y_{i,j,k}, \Delta Y_{i',j',k'}) &= \frac{\mathrm{cov}(\epsilon_{i,j,k}, \epsilon_{i',j',k'})}{\sqrt{\sigma_{i,j,k}^2 \sigma_{i',j',k'}^2}}
+&= \frac{\sigma_{j,j'}}{\sqrt{\sigma_{i,j,k}^2 \sigma_{i',j',k'}^2}}
+\end{align}
+$$
+
+Here we used Assumption 4 to equate $\mathrm{cov}(\epsilon_{i,j,k}, \epsilon_{i',j',k'}) = \sigma_{j,j'}$ where $j$ and $j'$ are the ROIs, since the resulting covariance must independent of labs $k,k'$ and subject $i,i'$. Therefore by scaling each ROI-subject pair by the standard deviation, we can pool the data to get an time, subject and lab independent dataset.
+
+### *Pushback*
+
+Now, we know we have made very strong assumptions about the data. The data from Trinity probably has a time component to it as it was screened task based. Moreover, labs do follow up research thus them being independent of each other is not a good assumption. These aside, the more critical weakness is that the model is currently a Random Walk. This also is not the soundest option regarding biological facts. However, we hope our assumptions are not too far off from the truth and we can still get a good estimate of the correlation matrix. Here is some code:
+
 ```{r}
 # Load the data
 # setwd("homework2")
@@ -31,7 +60,7 @@ load("hw2_data.RData")
 asd <- lapply(asd_sel, function(x) as.data.frame(x))
 td  <- lapply(td_sel, function(x) as.data.frame(x))
 
-
+# function to scale variation to 1 assuming 0 mean
 scale_0mean <- function(x) {
   n <- nrow(x)                    # number of observations
   x <- as.matrix.data.frame(x)
@@ -40,36 +69,32 @@ scale_0mean <- function(x) {
   return(as.data.frame(x))
 }
 
+# scale the datasets
 asd <- lapply(asd, scale_0mean)
 td  <- lapply(td,  scale_0mean)
-
 
 # Pool the data
 asd <- do.call(rbind, asd)
 td  <- do.call(rbind, td)
-
 ```
 
 
 ## Task 2: Estimating the Correlation Matrix
 
-Now, let's exactly do what we have described above.
+Now, based on our assumptions above, we will slightly modify the Pearson correlation coefficient to estimate the correlation matrix. We will assume that the mean is zero.
 
 ```{r}
-
-# Correlation assuming 0 mean
+# Pearson Correlation assuming 0 mean
 cor_0mean <- function(x) {
-  x <- as.matrix.data.frame(x)
-  x <- t(x) %*% x
-  x <- x / sqrt(diag(x) %o% diag(x))
+  x <- as.matrix.data.frame(x)       # convert to matrix
+  x <- t(x) %*% x                    # sum of squares
+  x <- x / sqrt(diag(x) %o% diag(x)) # correlation matrix
   return(x)
 }
 
-
-# Get the correlation matrix for each subject
+# Estimate the correlation matrices
 R.asd <- cor_0mean(asd)
 R.td  <- cor_0mean(td)
-
 ```
 
 In, order to estimate the association graphs $\widehat{\mathcal{G}}^{\mathrm{ASD}}(t)$ and $\widehat{\mathcal{G}}^{\mathrm{TD}}(t)$, we will to construct a confidence interval of 95% for each correlation coefficient. We are interested if the absolute value of the correlation coefficient is greater than $t$ therefore we will use a **single-sided** confidence interval.
@@ -77,25 +102,150 @@ In, order to estimate the association graphs $\widehat{\mathcal{G}}^{\mathrm{ASD
 Let's start with performing the **Fisher Z transformation** on the correlation matrices to make them more Gaussian. We will also use the **Bonferonni correction** to correct for multiple testing.
 
 ```{r}
-asso_graph <- function(R, alpha = 0.05, n=145, tau = 0.5, bonf = TRUE) {
+asso_graph <- function(R, alpha = 0.05, n=12*145, tau = 0.5, bonf = TRUE) {
   z <- abs(atanh(R))                    # Fisher Z transformation
   z.sigma <- 1 / sqrt(n - 3)            # variance fisher z transformation
   p <- nrow(z)                          # number of ROIs
   m <- if (bonf) p * (p - 1) / 2 else 1 # number of hypothesis (edges in the graph)
   q <- qnorm(1-alpha/m)                 # quantile of the standard normal distribution
-  tau <- atanh(tau)                       # threshold (transformed)
-  G <- 1 * (z > tau + q * z.sigma)        # construct the association graph
+  tau <- atanh(tau)                     # threshold (transformed)
+  G <- 1 * (z > tau + q * z.sigma)      # construct the association graph
   diag(G) <- 0                          # set the diagonal to zero
   return(G)
 }
 
-G.asd <- asso_graph(R.asd, tau = 0.1)
-G.td  <- asso_graph(R.td, tau = 0.1)
-paste("Number of edges in the ASD and TD graphs using Bonferonni correction:", 
-      sum(G.asd) / 2, sum(G.td) / 2)
+G.asd <- asso_graph(R.asd)
+G.td  <- asso_graph(R.td)
+G.dif <- asso_graph(R.asd - R.td)
+
+paste("Number of edges in the ASD, TD and their difference graphs using Bonferonni correction:", 
+      sum(G.asd) / 2, sum(G.td) / 2, sum(G.dif) / 2)
 ```
 
-We are also going to implement the **Holm-Bonferonni method** to correct for multiple testing, which is a less conservative method than the Bonferonni correction.
+Now, we want to select a threshold $\tau$ to construct the association graphs. We will plot the number of edges in the graph as a function of $\tau$.
+
+```{r}
+
+m <- 80
+tau_grid <- seq(0.2, 1, length.out = m)
+
+num_edges <- matrix(NA, nrow = m, ncol = 3)
+colnames(num_edges) <- c("ASD", "TD", "Difference")
+
+for (i in 1:m) {
+  G.asd <- asso_graph(R.asd, tau = tau_grid[i], bonf = FALSE)
+  G.td  <- asso_graph(R.td,  tau = tau_grid[i], bonf = FALSE)
+  G.dif <- asso_graph(R.asd - R.td, tau = tau_grid[i], bonf = FALSE)
+  num_edges[i, ] <- c(sum(G.asd) / 2, sum(G.td) / 2, sum(G.dif) / 2)
+}
+
+library(ggplot2, quietly = TRUE)
+
+num_edges <- as.data.frame(num_edges)
+
+ggplot(num_edges, aes(x = tau_grid)) +
+  geom_line(aes(y = ASD, color = "ASD")) +
+  geom_line(aes(y = TD, color = "TD")) +
+  geom_line(aes(y = Difference, color = "Difference")) +
+  labs(title = "Number of Edges in the Graph as a Function of Threshold",
+       x = "Threshold", y = "Number of Edges") +
+  theme_minimal()
+
+```
+
+## Task 3: Comparing the Association Graphs
+
+In this part, we will compare the two association graphs. In order to do so, we will use the packages `ggraph` and `tidygraph` to plot the graphs.
+
+```{r}
+library(ggraph, quietly = TRUE)
+library(tidygraph, quietly = TRUE)
+
+load("neuro.aal.rda")
+
+neuro.aal <- levels(neuro.aal$desc$label)
+# split desc with "_" and take the first element
+superregion <- sapply(neuro.aal, function(x) strsplit(x, "_")[[1]][1])
+
+G.asd <- asso_graph(R.asd, tau = 0.5)
+as_tbl_graph(G.asd * R.asd, directed = FALSE) %>%
+  ggraph(layout = "circle") +
+  geom_edge_link(aes(color = weight), alpha = 0.5) +
+  scale_edge_colour_distiller(palette = "PuRd", direction = 1) +
+  geom_node_point(aes(color = superregion), size = 3) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  labs(title = "ASD Association Graph") +
+  theme_void()
+
+G.td <- asso_graph(R.td, tau = 0.5)
+as_tbl_graph(G.td * R.td, directed = FALSE) %>%
+  ggraph(layout = "circle") +
+  geom_edge_link(aes(color = weight), alpha = 0.5) +
+  scale_edge_colour_distiller(palette = "PuRd", direction = 1) +
+  geom_node_point(aes(color = superregion), size = 3) +
+  geom_node_text(aes(label = name), repel = TRUE) +
+  labs(title = "TD Association Graph") +
+  theme_void()
+
+```
+
+## Task 4: Partial Correlation
+
+In this part, we will use the partial correlation to remove the effect of the other ROIs on the correlation between two ROIs. We will use the `pcor` function from the `ppcor` package to compare our code with the function.
+
+```{r}
+library(ppcor, quietly = TRUE)
+
+PCor.asd.frompackage <- pcor(asd)$estimate
+PCor.td.frompackage <- pcor(td)$estimate
+
+mypcor <- function(x) {
+  Pcor <- solve(var(x))
+  Pcor <- - Pcor / sqrt(diag(Pcor) %o% diag(Pcor))
+  diag(Pcor) <- 1
+  return(Pcor)
+}
+
+PCor.asd <- mypcor(asd)
+PCor.td <- mypcor(td)
+
+
+paste("The maximum difference between the partial correlation for ASD and TD from the package and our code is:", 
+      max(abs(PCor.asd.frompackage - PCor.asd)), "and", max(abs(PCor.td.frompackage - PCor.td)))
+
+
+
+asso_graph_partial <- function(L, alpha = 0.05, n=12*145, tau = 0.5, bonf = TRUE) {
+  z <- abs(0.5 * (log(1+L) - log(1-L))) # Z transformation
+  d <- nrow(L)
+  z.sigma <- 1 / sqrt(12*145 - d -1)    # variance
+  p <- nrow(z)                          # number of ROIs
+  m <- if (bonf) p * (p - 1) / 2 else 1 # number of hypothesis (edges in the graph)
+  q <- qnorm(1-alpha/m)                 # quantile of the standard normal distribution
+  tau <- (log((1 + tau) / (1-tau))) / 2 # threshold (transformed)
+  G <- 1 * (z > tau + q * z.sigma)      # construct the association graph
+  diag(G) <- 0                          # set the diagonal to zero
+  return(G)
+}
+
+G.asd.Pcor <- asso_graph_partial(PCor.asd, tau = 0.1)
+G.td.Pcor <- asso_graph_partial(PCor.td, tau = 0.1)
+
+paste("Number of edges in the ASD and TD graphs using partial correlation:", 
+      sum(G.asd.Pcor) / 2, sum(G.td.Pcor) / 2)
+
+```
+
+## References
+
+- Craddock, C., Benhajali, Y., Chu, C., Chouinard, F., Evans, A., Jakab, A., ... & Bellec, P. (2013). The neuro bureau preprocessing initiative: open sharing of preprocessed neuroimaging data and derivatives. *Frontiers in Neuroinformatics, 7,* 27.
+
+
+## Appendix
+
+### Holm Bonferonni
+
+Our implementation of the Holm Bonferonni correction is the following:
 
 ```{r}
 asso_graph_HB <- function(R, alpha = 0.05, n=145, tau = 0.5) {
@@ -139,56 +289,3 @@ paste("Number of edges in the ASD and TD graphs using Holm-Bonferonni method:",
       sum(G.asd.HB) / 2, sum(G.td.HB) / 2)
 
 ```
-
-OK, it did not make much of a difference. Maybe we'll remove this part. We need to choose a threshold $\tau$ by trial and error. Uhmm let's do that later, now we do task 3.
-
-## Task 3: Comparing the Association Graphs
-
-In this part, we will compare the two association graphs. In order to do so, we will use the packages `igraph` and `ggraph` to plot the graphs and `ggnetwork` to compare them.
-
-```{r}
-library(ggraph, quietly = TRUE)
-library(tidygraph, quietly = TRUE)
-
-load("neuro.aal.rda")
-
-neuro.aal <- levels(neuro.aal$desc$label)
-# split desc with "_" and take the first element
-superregion <- sapply(neuro.aal, function(x) strsplit(x, "_")[[1]][1])
-
-
-as_tbl_graph(G.asd * R.asd, directed = FALSE) %>%
-  ggraph(layout = "circle") +
-  geom_edge_link(aes(color = weight), alpha = 0.5) +
-  scale_edge_colour_distiller(palette = "PuRd", direction = 1) +
-  geom_node_point(aes(color = superregion), size = 3) +
-  geom_node_text(aes(label = name), repel = TRUE) +
-  labs(title = "ASD Association Graph") +
-  theme_void()
-
-as_tbl_graph(G.td * R.td, directed = FALSE) %>%
-  ggraph(layout = "circle") +
-  geom_edge_link(aes(color = weight), alpha = 0.5) +
-  scale_edge_colour_distiller(palette = "PuRd", direction = 1) +
-  geom_node_point(aes(color = superregion), size = 3) +
-  geom_node_text(aes(label = name), repel = TRUE) +
-  labs(title = "TD Association Graph") +
-  theme_void()
-
-```
-
-## Task 4: Partial Correlation
-
-In this part, we will use the partial correlation to remove the effect of the other ROIs on the correlation between two ROIs. We will use the `pcor` function from the `ppcor` package to compare our code with the function.
-
-```{r}
-library(ppcor, quietly = TRUE)
-
-R.asd.pcor <- pcor(asd)
-R.td.pcor <- pcor(td)
-
-R.asd.pcor 
-
-
-```
-
