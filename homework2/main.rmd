@@ -1,7 +1,7 @@
 
 ---
 title: "Homework 2 for SDS, Fall 2022"
-author: "Cem Sirin & Sophia Balestrucci & Vahid Ghanbarizadeh"
+author: "Cem Sirin & Sara Zeynalpour & Sophia Balestrucci & Vahid Ghanbarizadeh"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -124,33 +124,34 @@ paste("Number of edges in the ASD, TD and their difference graphs using Bonferon
 
 Now, we want to select a threshold $\tau$ to construct the association graphs. We will plot the number of edges in the graph as a function of $\tau$.
 
-```{r}
-
-m <- 80
-tau_grid <- seq(0.2, 1, length.out = m)
+```{r warning=FALSE}
+m <- 200
+tau_grid <- seq(0, 1, length.out = m)
 
 num_edges <- matrix(NA, nrow = m, ncol = 3)
 colnames(num_edges) <- c("ASD", "TD", "Difference")
 
 for (i in 1:m) {
-  G.asd <- asso_graph(R.asd, tau = tau_grid[i], bonf = FALSE)
-  G.td  <- asso_graph(R.td,  tau = tau_grid[i], bonf = FALSE)
-  G.dif <- asso_graph(R.asd - R.td, tau = tau_grid[i], bonf = FALSE)
+  G.asd <- asso_graph(R.asd, tau = tau_grid[i])
+  G.td  <- asso_graph(R.td,  tau = tau_grid[i])
+  G.dif <- asso_graph(R.asd - R.td, tau = tau_grid[i])
   num_edges[i, ] <- c(sum(G.asd) / 2, sum(G.td) / 2, sum(G.dif) / 2)
 }
 
 library(ggplot2, quietly = TRUE)
 
 num_edges <- as.data.frame(num_edges)
-
 ggplot(num_edges, aes(x = tau_grid)) +
   geom_line(aes(y = ASD, color = "ASD")) +
   geom_line(aes(y = TD, color = "TD")) +
   geom_line(aes(y = Difference, color = "Difference")) +
+  scale_y_continuous(
+    sec.axis = sec_axis(~./(116*115)*100, name = "Percentage of Edges (%)", breaks = seq(0, 13, 2)),
+    trans = "log2") +
+  #scale_y_continuous(trans='log2') +
   labs(title = "Number of Edges in the Graph as a Function of Threshold",
        x = "Threshold", y = "Number of Edges") +
   theme_minimal()
-
 ```
 
 ## Task 3: Comparing the Association Graphs
@@ -248,7 +249,7 @@ paste("Number of edges in the ASD and TD graphs using partial correlation:",
 Our implementation of the Holm Bonferonni correction is the following:
 
 ```{r}
-asso_graph_HB <- function(R, alpha = 0.05, n=145, tau = 0.5) {
+asso_graph_HB <- function(R, alpha = 0.05, n=12*145, tau = 0.5) {
   z <- abs(atanh(R))                    # Fisher Z transformation
   z.sigma <- 1 / sqrt(n - 3)            # variance fisher z transformation
   p <- nrow(z)                          # number of ROIs
