@@ -13,35 +13,62 @@ output:
 
 ## Task 1: Pooling Subjects
 
-Our first task is to pool the data for the two subject groups. The fMRI data that we have contains time series for each subject and each Region of Interest (ROI). We are interested in estimating the correlation between ROIs. Our first approach is to estimate the correlation between ROIs for each subject and then average the correlations across subjects. Our reasoning is that
+Our first objective is to pool the data for the two subject groups. The fMRI data that we have contains time series for each subject and each Region of Interest (ROI). We are interested in estimating the correlation between ROIs. To do so, we will introduce our assumptions and their justifications.
 
-a. The subjects may not be synchronized in time with regards to the cognitive or motor task that they are performing. Therefore, we believe that estimating the correlation per subject and then averaging the correlations across subjects is more robust. 
-b. Moreover, a neural activity causes a *hemodynamic response function* (HRF) which is a time-varying function that affects the blood oxygen levels. The HRF is not synchronized across subjects. Therefore, we believe that pooling the data across subjects is more robust.
+1. For a given subject, the time series of the ROIs are independent and identically distributed (i.i.d.) with regards to time.
+2. The fMRI data measures the change in the blood oxygen levels. Biologically, it is not possible for the blood oxygen levels to have an increasing/decreasing trend. Therefore, we assume that the mean is zero for each ROI.
+3. The subjects vary in terms of biological and cognitive factors. Therefore, we assume that the variance is different for each ROI-subject pair. However, we will assume that the correlation between the ROIs is the same for each subject.
+4. The subjects are independent of each other.
 
-When it comes to processing the data of an individual, we would like to address a couple issues. First of all, we are dealing with **Pearson correlation**, which means that methods such as demeaning or standardizing the data will not affect the correlation. 
+Based on these assumptions, we willl pool the data in the following way. First, we will standardize each ROI-subject pair by dividing by the standard deviation that is estimated assuming zero mean. Then, we can simply pool the data that will result in a matrix of size $1740 \times 116$.
+  
+```{r}
+# Load the data
+# setwd("homework2")
+load("hw2_data.RData")
+
+# Standardize the data
+asd <- lapply(asd_sel, function(x) as.data.frame(x))
+td  <- lapply(td_sel, function(x) as.data.frame(x))
+
+
+scale_0mean <- function(x) {
+  n <- nrow(x)                    # number of observations
+  x <- as.matrix.data.frame(x)
+  sdv <- sqrt(diag(t(x) %*% x)/n) # standard deviation
+  x <- t(t(x) / sdv)              # divide by the standard deviation
+  return(as.data.frame(x))
+}
+
+asd <- lapply(asd, scale_0mean)
+td  <- lapply(td,  scale_0mean)
+
+
+# Pool the data
+asd <- do.call(rbind, asd)
+td  <- do.call(rbind, td)
+
+```
+
 
 ## Task 2: Estimating the Correlation Matrix
 
 Now, let's exactly do what we have described above.
 
 ```{r}
-# Load the data
-# setwd("homework2")
-load("hw2_data.RData")
+
+# Correlation assuming 0 mean
+cor_0mean <- function(x) {
+  x <- as.matrix.data.frame(x)
+  x <- t(x) %*% x
+  x <- x / sqrt(diag(x) %o% diag(x))
+  return(x)
+}
+
 
 # Get the correlation matrix for each subject
-R.asd <- lapply(asd_sel, cor)
-R.td  <- lapply(td_sel,  cor)
-
-# Average the correlation matrices across subjects
-R.asd.mean <- matrix(0, nrow = 116, ncol = 116)
-R.td.mean  <- matrix(0, nrow = 116, ncol = 116)
-
-for (r in R.asd) R.asd.mean <- R.asd.mean + r
-for (r in R.td)  R.td.mean  <- R.td.mean  + r
-
-R.asd.mean <- R.asd.mean / length(R.asd)
-R.td.mean  <- R.td.mean  / length(R.td)
+R.asd <- cor_0mean(asd)
+R.td  <- cor_0mean(td)
 
 ```
 
@@ -62,8 +89,8 @@ asso_graph <- function(R, alpha = 0.05, n=145, tau = 0.5, bonf = TRUE) {
   return(G)
 }
 
-G.asd <- asso_graph(R.asd.mean, tau = 0.1)
-G.td  <- asso_graph(R.td.mean, tau = 0.1)
+G.asd <- asso_graph(R.asd, tau = 0.1)
+G.td  <- asso_graph(R.td, tau = 0.1)
 paste("Number of edges in the ASD and TD graphs using Bonferonni correction:", 
       sum(G.asd) / 2, sum(G.td) / 2)
 ```
@@ -105,8 +132,8 @@ asso_graph_HB <- function(R, alpha = 0.05, n=145, tau = 0.5) {
   return(G)
 }
 
-G.asd.HB <- asso_graph_HB(R.asd.mean, tau = 0.1)
-G.td.HB  <- asso_graph_HB(R.td.mean, tau = 0.1)
+G.asd.HB <- asso_graph_HB(R.asd, tau = 0.1)
+G.td.HB  <- asso_graph_HB(R.td, tau = 0.1)
 
 paste("Number of edges in the ASD and TD graphs using Holm-Bonferonni method:", 
       sum(G.asd.HB) / 2, sum(G.td.HB) / 2)
@@ -130,7 +157,7 @@ neuro.aal <- levels(neuro.aal$desc$label)
 superregion <- sapply(neuro.aal, function(x) strsplit(x, "_")[[1]][1])
 
 
-as_tbl_graph(G.asd * R.asd.mean, directed = FALSE) %>%
+as_tbl_graph(G.asd * R.asd, directed = FALSE) %>%
   ggraph(layout = "circle") +
   geom_edge_link(aes(color = weight), alpha = 0.5) +
   scale_edge_colour_distiller(palette = "PuRd", direction = 1) +
@@ -139,7 +166,7 @@ as_tbl_graph(G.asd * R.asd.mean, directed = FALSE) %>%
   labs(title = "ASD Association Graph") +
   theme_void()
 
-as_tbl_graph(G.td * R.td.mean, directed = FALSE) %>%
+as_tbl_graph(G.td * R.td, directed = FALSE) %>%
   ggraph(layout = "circle") +
   geom_edge_link(aes(color = weight), alpha = 0.5) +
   scale_edge_colour_distiller(palette = "PuRd", direction = 1) +
@@ -157,14 +184,11 @@ In this part, we will use the partial correlation to remove the effect of the ot
 ```{r}
 library(ppcor, quietly = TRUE)
 
-asd <- lapply(asd_sel, function(x) as.data.frame(scale(as.data.frame(x)))) %>% 
-  data.table::rbindlist() %>% as.data.frame()
-
-td <- lapply(td_sel, function(x) as.data.frame(scale(as.data.frame(x)))) %>% 
-  data.table::rbindlist() %>% as.data.frame()
 R.asd.pcor <- pcor(asd)
 R.td.pcor <- pcor(td)
 
 R.asd.pcor 
+
+
 ```
 

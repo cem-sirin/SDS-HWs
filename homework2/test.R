@@ -4,6 +4,26 @@ getwd() # this is you're current wd
 library(dplyr)
 load("hw2_data.RData")
 load("neuro.aal.rda")
+
+asd <- lapply(asd_sel, function(x) as.data.frame(x))
+td  <- lapply(td_sel, function(x) as.data.frame(x))
+
+d <- asd$caltech_0051472
+d <- asd$trinity_0050234
+
+
+asd
+
+
+
+# Correlation assuming 0 mean
+my_cor <- function(x) {
+  x <- as.matrix.data.frame(x)
+  x <- t(x) %*% x
+  x <- x / sqrt(diag(x) %o% t(diag(x)))
+  return(x)
+}
+
 neuro.aal <- levels(neuro.aal$desc$label)
 superregion <- sapply(neuro.aal, function(x) strsplit(x, "_")[[1]][1])
 superregion
@@ -32,5 +52,9 @@ sum(abs(R.td.mean)  > 0.5)
 
 neuro.aal$desc
 
-asd_sel <- lapply(asd_sel, function(x) scale(as.data.frame(x)))
-d <- Reduce()
+asd <- lapply(asd_sel, function(x) as.data.frame(scale(as.data.frame(x))))
+class(asd$caltech_0051472)
+
+library(data.table)
+d <- as.data.frame(rbindlist(asd))
+class(d)
