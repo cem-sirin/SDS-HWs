@@ -1,0 +1,472 @@
+
+---
+title: "Homework 2 for SDS, Fall 2022"
+subtitle: "Analysing fMRI data to compare people of Autism Spectrum Disorder and Typicals"
+author: "Cem Sirin & Sara Zeynalpour & Sophia Balestrucci & Vahid Ghanbarizadeh"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: paper
+    toc: true
+    toc_float: true
+    toc_collapsed: false
+    toc_depth: 4
+---
+
+## Task 1: Pooling Subjects
+
+Our first objective is to pool the data for the two subject groups. The preprocessed fMRI data that we have contains time series for each subject and each Region of Interest (ROI). We are interested in estimating the correlation between ROIs. To do so, we will introduce features of the data, our assumptions, and the pooling procedure.
+
+#### *Features of the Data*
+
+The data is obtained from the Autism Brain Imaging Data Exchange (ABIDE) initiative and is already preprocessed (Craddock et al., 2013). The ABIDE 1 dataset is formed by an international collaboration of researchers from 17 different institutions. Each insutution has a unique scanning procedure. In our case, our dataset is confined to data from California Institute of Technology (Caltech) and Trinity Centre for Health Sciences (Trinity). While screenings from Trinity are task based, Caltech is resting state. 
+
+#### *Assumptions*
+
+In the light of the features of the data, and the objective of the analysis, we will make the following assumptions:
+
+1. For a given subject, the time series of the ROIs are independent and identically distributed (i.i.d.) with regards to time. This assumption is given by the assignment prompt, so we must *abide* by it. See the word play :D?
+2. The fMRI data measures the change in the blood oxygen levels. In the long run, biologically, it is not possible for the blood oxygen levels to have an increasing/decreasing trend. In the short run, even if there is a detectable trend in the course of the experiment, then it conflicts with the assumption of time invariance. Moreover, as we have explained in the previous section, the dataset is not uniform in terms of experiment process so time dependent estimations are not a good idea. Therefore, we assume that the mean is zero for each ROI-subject pair.
+3. The subjects vary in terms of biological and cognitive factors. Moreover, the labs also have varying factors. Therefore, we assume that the variance is different for each ROI-subject-Lab triplet. However, we will assume that the correlation between the ROIs is the same for each subject-Lab pair, as it is pretty much necessary for the analysis.
+4. The subjects are independent of each other. The labs are also independent of each other. Also, the labs and the subjects are mutually independent.
+
+#### *Pooling Procedure*
+
+Based on these assumptions, we willl pool the data in the following way. First, we will standardize each ROI-subject pair by dividing by the standard deviation that is estimated assuming zero mean. Then, we can simply pool the data that will result in a matrix of size $1740 \times 116$. Our model resembles the following:
+
+$$
+\Delta Y_{i,j,k} = \epsilon_{i,j,k}
+$$
+
+where $i$ is the subject, $j$ is the ROI, and $k$ is the lab. $\Delta Y_{i,j,k}$ is the time series of the $j$th ROI for the $i$th subject from the $k$th lab. $\epsilon_{i,j,k}$ is the error term. Let $\sigma_{i,j,k}^2$ be the variance of the error term. The the correlation of $\Delta Y_{i,j,k}$ and $\Delta Y_{i',j',k'}$ is given by:
+
+$$
+\begin{align}
+\mathrm{corr}(\Delta Y_{i,j,k}, \Delta Y_{i',j',k'}) &= \frac{\mathrm{cov}(\epsilon_{i,j,k}, \epsilon_{i',j',k'})}{\sqrt{\sigma_{i,j,k}^2 \sigma_{i',j',k'}^2}}
+&= \frac{\sigma_{j,j'}}{\sqrt{\sigma_{i,j,k}^2 \sigma_{i',j',k'}^2}}
+\end{align}
+$$
+
+Here we used Assumption 4 to equate $\mathrm{cov}(\epsilon_{i,j,k}, \epsilon_{i',j',k'}) = \sigma_{j,j'}$ where $j$ and $j'$ are the ROIs, since the resulting covariance must independent of labs $k,k'$ and subject $i,i'$. Therefore by scaling each ROI-subject pair by the standard deviation, we can pool the data to get an time, subject and lab independent dataset.
+
+#### *Pushback*
+
+Now, we know we have made very strong assumptions about the data. The data from Trinity probably has a time component to it as it was screened task based. Moreover, labs do follow up research thus them being independent of each other is not a good assumption. These aside, the more critical weakness is that the model is currently a Random Walk. This also is not the soundest option regarding biological facts. However, we hope our assumptions are not too far off from the truth and we can still get a good estimate of the correlation matrix. Here is some code:
+
+```{r Data processing}
+# Load the data
+load("hw2_data.RData")
+
+# Standardize the data
+asd <- lapply(asd_sel, function(x) as.data.frame(x))
+td  <- lapply(td_sel, function(x) as.data.frame(x))
+
+# function to scale variation to 1 assuming 0 mean
+scale_0mean <- function(x) {
+  n <- nrow(x)                    # number of observations
+  x <- as.matrix.data.frame(x)
+  sdv <- sqrt(diag(t(x) %*% x)/n) # standard deviation
+  x <- t(t(x) / sdv)              # divide by the standard deviation
+  return(as.data.frame(x))
+}
+
+# scale the datasets
+asd <- lapply(asd, scale_0mean)
+td  <- lapply(td,  scale_0mean)
+
+# Pool the data
+asd <- do.call(rbind, asd)
+td  <- do.call(rbind, td)
+```
+
+
+## Task 2: Estimating the Correlation Matrix
+
+Now, based on our assumptions above, we will slightly modify the Pearson correlation coefficient to estimate the correlation matrix. We will assume that the mean is zero.
+
+```{r Estimating Correlation}
+# Pearson Correlation assuming 0 mean
+cor_0mean <- function(x) {
+  x <- as.matrix.data.frame(x)       # convert to matrix
+  x <- t(x) %*% x                    # sum of squares
+  x <- x / sqrt(diag(x) %o% diag(x)) # correlation matrix
+  return(x)
+}
+
+# Estimate the correlation matrices
+R.asd <- cor_0mean(asd)
+R.td  <- cor_0mean(td)
+```
+
+In, order to estimate the association graphs $\widehat{\mathcal{G}}^{\mathrm{ASD}}(t)$ and $\widehat{\mathcal{G}}^{\mathrm{TD}}(t)$, we will to construct a confidence interval of 95% for each correlation coefficient. We are interested if the absolute value of the correlation coefficient is greater than $t$ therefore we will use a **single-sided** confidence interval.
+
+Let's start with performing the **Fisher Z transformation** on the correlation matrices to make them more Gaussian. We will also use the **Bonferonni correction** to correct for multiple testing.
+
+```{r Association Graph 1, warning=FALSE}
+asso_graph <- function(R, alpha = 0.05, n=12*145, tau = 0.5, bonf = TRUE) {
+  z <- abs(atanh(R))                    # Fisher Z transformation
+  z.sig <- 1 / sqrt(n - 3)              # variance fisher z transformation
+  p <- nrow(z)                          # number of ROIs
+  m <- if (bonf) p * (p - 1) / 2 else 1 # number of hypothesis (edges in the graph)
+  q <- qnorm(1-alpha/m)                 # quantile of the standard normal distribution
+  tau <- atanh(tau)                     # threshold (transformed)
+  G <- 1 * (z > tau + q * z.sig)        # construct the association graph
+  diag(G) <- 0                          # set the diagonal to zero
+  return(G)
+}
+```
+
+We will also be implementing the association graph for the difference of the correlation matrices. To test the significance of the difference in the correlation estimates, we will use the **Fisher Z transformation** again. In order to do so, we assume the null hypothesis $\rho_{j,k}^{ASD} = \rho_{j,k}^{TD}$ is equivalent with $Z_{j,k}^{ASD} = Z_{j,k}^{TD}$ where $Z_{j,k}^{ASD}$ and $Z_{j,k}^{TD}$ are the Fisher Z transformed correlation coefficients of ROI $j$ and $k$. Since we know that $Z_{j,k} \sim \mathrm{N}_1(\theta_{j,k}, \frac{1}{n-3})$, thus the difference approximates to
+
+$$Z_{j,k}^{ASD} - Z_{j,k}^{TD} \sim \mathrm{N}_1\left(\theta_{j,k}^{ASD} - \theta_{j,k}^{TD}, \frac{2}{n-3}\right)$$.
+
+Let's execute!
+
+```{r Association Graph 2, warning=FALSE}
+asso_graph_diff <- function(R1, R2, alpha = 0.05, n=12*145, tau = 0.5, bonf = TRUE) {
+  z <- abs(atanh(R1) - atanh(R2))       # Fisher Z transformation
+  z.sig <- sqrt(2 / (n - 3))            # variance fisher z transformation
+  p <- nrow(z)                          # number of ROIs
+  m <- if (bonf) p * (p - 1) / 2 else 1 # number of hypothesis (edges in the graph)
+  q <- qnorm(1-alpha/m)                 # quantile of the standard normal distribution
+  tau <- atanh(tau)                     # threshold (transformed)
+  G <- 1 * (z > tau + q * z.sig)        # construct the association graph
+  diag(G) <- 0                          # set the diagonal to zero
+  return(G)
+}
+
+G.asd <- asso_graph(R.asd)
+G.td  <- asso_graph(R.td)
+G.dif <- asso_graph_diff(R.asd, R.td)
+
+paste("Number of edges in the ASD, TD and their difference graphs using Bonferonni correction:", 
+      sum(G.asd) / 2, sum(G.td) / 2, sum(G.dif) / 2)
+```
+
+Now, we want to select a threshold $\tau$ to construct the association graphs. We will plot the number of edges in the graph as a function of $\tau$.
+
+```{r warning=FALSE}
+m <- 200
+tau_grid <- seq(0, 1, length.out = m)
+
+num_edges <- matrix(NA, nrow = m, ncol = 4)
+colnames(num_edges) <- c("ASD", "TD", "SymmetricDif", "Difference")
+
+for (i in 1:m) {
+  G.asd <- asso_graph(R.asd, tau = tau_grid[i])
+  G.td  <- asso_graph(R.td,  tau = tau_grid[i])
+  G.syd <- (G.asd + G.td) == 1
+  G.dif <- asso_graph(R.asd - R.td, tau = tau_grid[i])
+  num_edges[i, ] <- c(sum(G.asd) / 2, sum(G.td) / 2, sum(G.syd) / 2, sum(G.dif) / 2)
+}
+
+library(ggplot2, quietly = TRUE)
+
+num_edges <- as.data.frame(num_edges)
+ggplot(num_edges, aes(x = tau_grid)) +
+  geom_line(aes(y = ASD, color = "ASD")) +
+  geom_line(aes(y = TD, color = "TD")) +
+  geom_line(aes(y = SymmetricDif, color = "SymmetricDif")) +
+  geom_line(aes(y = Difference, color = "Difference")) +
+  scale_y_continuous(
+    sec.axis = sec_axis(~./(116*115)*100, name = "Percentage of Edges (%)", breaks = 2^seq(0, 8)/10),
+    trans = "log2") +
+  labs(title = "Number of Edges in the Graph as a Function of Threshold",
+       x = "Threshold", y = "Number of Edges") +
+  theme_minimal()
+```
+
+#### *Un petit interlude on the intrepeting the plot*
+
+At $\tau = 0$ we have `r sum(asso_graph_diff(R.asd, R.td, tau = 0))` edges in the difference graph. This means that there are `r sum(asso_graph_diff(R.asd, R.td, tau = 0))` correlation coefficients that are significantly different between the ASD and TD groups. While for the ASD and TD graph the points at $\tau=0$ shows the number of correlation coefficients that are significantly different from zero. So even though they are in the same plot for practical purposes, be aware $\tau$ does not convey the same meaning for the ASD and TD graph as it does for the difference graph.
+
+In the plot, you can see that as the threshold increases the number of edges in the graph decreases, as expected. Moreover, the number of edges in the ASD and TD graph follow each other very closely, and for clarity we have plotted the symmetric difference of the two graphs as well, that is the total number of edges in the graph that are not in the other graph. So even for higher thresholds we do get many unique edges in each graph. The difference graph, on the other hand, shows a different behavior. The number of edges in the graph decreases much more rapidly than the other two graphs. This is not surprising, as explained in the interlude above.
+
+## Task 3: Visualizing Association Graphs
+
+In this part, we will compare the two association graphs. In order to do so, we will use the packages `ggraph` and `tidygraph` to plot the graphs. We want to address the issue of using different thresholds and whether using the Bonferonni correction. Both of these adjustments change the rejection region of the tests in a linear fashion. So we don't see any added benefits of playing with the threshold or the Bonferonni correction, in the plotting stage. Rather, we will color the edges in the graph according to their estimate value that is also as explanatory as using different thresholds. So, links with darker color are more resilient to being rejected. 
+
+#### Visualization of the Difference Graph
+
+We start with the difference graph.
+
+```{r Invis, message=FALSE, warning=FALSE, include=FALSE}
+load("neuro.aal.rda")
+neuro.aal <- levels(neuro.aal$desc$label)
+# split desc with "_" and take the first element
+region <- sapply(neuro.aal, function(x) strsplit(x, "_")[[1]][1])
+
+region2lobe <- function(region) {
+  if (region %in% c("Amygdala", "Fusiform", "Heschl", "Hippocampus", "ParaHippocampal", "Temporal")) {
+    return("Temporal Lobe")
+  } else if (region %in% c("Cerebelum", "Vermis")) {
+    return("Posterior Fossa")
+  } else if (region %in% c("Insula", "Cingulum")) {
+    return("Insula and Cingulate Gyri")
+  } else if (region %in% c("Frontal", "Olfactory", "Rolandic", "Rectus", "Paracentral", "Precentral", "Supp")) {
+    return("Frontal Lobe")
+  } else if (region %in% c("Calcarine", "Cuneus", "Lingual", "Occipital")) {
+    return("Occipital Lobe")
+  } else if (region %in% c("Postcentral", "Parietal", "SupraMarginal", "Angular", "Precuneus")) {
+    return("Parietal Lobe")
+  } else if (region %in% c("Caudate", "Putamen", "Pallidum", "Thalamus")) {
+    return("Central Structures")
+  }
+}
+superregion <- sapply(region, region2lobe)
+```
+
+```{r Visualization Difference, message=FALSE, warning=FALSE}
+library(ggraph, quietly = TRUE)
+library(tidygraph, quietly = TRUE)
+library(ggforce, quietly = TRUE)
+
+G.dif <- asso_graph_diff(R.asd, R.td, tau = 0.1)
+R.dif <- R.asd - R.td
+
+G.dif.tbl <- as_tbl_graph(G.dif * R.dif, directed = FALSE)
+
+# Order the nodes by superregion
+G.dif.tbl <- G.dif.tbl %>%
+  mutate(region = region) %>%
+  mutate(superregion = superregion) %>%
+  arrange(superregion, region, name)
+
+ggraph(G.dif.tbl, layout = "circle") +
+  geom_edge_link(aes(color = weight^3), alpha = 0.8) +
+  scale_edge_colour_distiller(palette = "PiYG", direction = 1) +
+  geom_node_point(aes(color = superregion), size = 3) +
+  geom_mark_ellipse(aes(x = x, y = y, group = region, fill = region, filter = region %in% c("Cerebelum", "Frontal", "Temporal"), label=region), alpha = 0.2, show.legend = TRUE) +
+  labs(title = "Association Graph, Difference in Correlation Estimates") +
+  theme_void()
+```
+
+As we are no neorologists, we will our very limited knowledge to interpret the graph. It will demonstrate that people with knowledge can indeed intetpret this graph. On the graph above, the links with green color reflects that correlation is singificantly higher for ASD, pink for TD. We can see that there is more coactivation of neurons in the Cerebelum region for ASD subjects. Cerebelum is responsible to control the movement of the body. Maybe subjects with ASD have more difficulty in controlling their body movement to perform same task as TD subjects. We can also see that there is one dark pink and one dark green lines between the Frontal and Temporal lobes. These regions could be investigated to understand the differences in how ASD and TD subjects process information.
+
+#### Visualization of ASD and TD Graphs
+
+Now we move on to the ASD and TD graphs.
+
+```{r Visualization ASD-TD, message=FALSE, warning=FALSE}
+
+G.asd <- asso_graph(R.asd, tau = 0.4)
+G.td <- asso_graph(R.td, tau = 0.4)
+
+G.asd.tbl <- as_tbl_graph(G.asd * R.asd, directed = FALSE)
+G.td.tbl <- as_tbl_graph(G.td * R.td, directed = FALSE)
+
+# Order the nodes by superregion
+G.asd.tbl <- G.asd.tbl %>%
+  mutate(region = region) %>%
+  mutate(superregion = superregion) %>%
+  arrange(superregion, region, name)
+
+G.td.tbl <- G.td.tbl %>%
+  mutate(region = region) %>%
+  mutate(superregion = superregion) %>%
+  arrange(superregion, region, name)
+
+ggraph(G.asd.tbl, layout = 'linear', circular = TRUE) +
+  geom_edge_arc(aes(color = weight, width = weight), alpha = 0.3) +
+  scale_edge_colour_distiller(palette = "Purples", direction = 1) +
+  geom_node_point(aes(color = superregion), size = 3) +
+  geom_mark_ellipse(aes(x = x, y = y, group = region, fill = region, filter = region %in% c("Cerebelum", "Frontal", "Temporal"), label=region), alpha = 0.2, show.legend = TRUE) +
+  labs(title = "Association Graph, ASD") +
+  theme_void()
+
+ggraph(G.td.tbl, layout = 'linear', circular = TRUE) +
+  geom_edge_arc(aes(color = weight, width = weight), alpha = 0.3) +
+  scale_edge_colour_distiller(palette = "Oranges", direction = 1) +
+  geom_node_point(aes(color = superregion), size = 3) +
+  geom_mark_ellipse(aes(x = x, y = y, group = region, fill = region, filter = region %in% c("Cerebelum", "Frontal", "Temporal"), label=region), alpha = 0.2, show.legend = TRUE) +
+  labs(title = "Association Graph, TD") +
+  theme_void()
+```
+
+In these graphs we have used $\tau=0.4$ and the Bonferonni correction to remove the links with low correlation. Overall, we can say the shape looks similar, and it is hard to spot the difference by comparing these two graphs. 
+
+## Task 4: Partial Correlation
+
+In this part, we will use the partial correlation to remove the effect of the other ROIs on the correlation between two ROIs. We will use the `pcor` function from the `ppcor` package to compare our code with the function.
+
+```{r Partial Correlation, message=FALSE, warning=FALSE}
+library(ppcor, quietly = TRUE)
+
+PCor.asd.frompackage <- pcor(asd)$estimate
+PCor.td.frompackage <- pcor(td)$estimate
+
+mypcor <- function(x) {
+  Pcor <- solve(var(x))
+  Pcor <- - Pcor / sqrt(diag(Pcor) %o% diag(Pcor))
+  diag(Pcor) <- 1
+  return(Pcor)
+}
+
+PCor.asd <- mypcor(asd)
+PCor.td <- mypcor(td)
+
+
+paste("The maximum difference between the partial correlation for ASD and TD from the package and our code is:", 
+      max(abs(PCor.asd.frompackage - PCor.asd)), "and", max(abs(PCor.td.frompackage - PCor.td)))
+
+```
+
+We can see that the maximum difference between the partial correlation for ASD and TD from the package and our code is nearly 0. This means that our code is correct. Now we adapt the same with 0 mean assumption.
+
+```{r Partial Correlation with 0 mean, message=FALSE, warning=FALSE}
+
+pcor0mean <- function(x) {
+  x <- as.matrix.data.frame(x)       # convert to matrix
+  x <- (t(x) %*% x) / nrow(x)        # compute the covariance matrix
+  Pcor <- solve(x)                   # compute the inverse of the covariance matrix
+  Pcor <- - Pcor / sqrt(diag(Pcor) %o% diag(Pcor)) # compute the partial correlation
+  diag(Pcor) <- 1                    # set the diagonal to 1
+  return(Pcor)
+}
+
+Pcor.asd <- pcor0mean(asd)
+Pcor.td <- pcor0mean(td)
+```
+
+Now we can visualize the partial correlation for ASD and TD.
+  
+```{r Visualization Partial Correlation, message=FALSE, warning=FALSE}
+
+asso_graph_partial <- function(L, alpha = 0.05, n=12*145, tau = 0.5, bonf = TRUE) {
+  z <- abs(atanh(L))                    # Z transformation
+  d <- nrow(L)                          # number of dimensions
+  z.sigma <- 1 / sqrt(n - d -1)    # variance
+  p <- nrow(z)                          # number of ROIs
+  m <- if (bonf) p * (p - 1) / 2 else 1 # number of hypothesis (edges in the graph)
+  q <- qnorm(1-alpha/m)                 # quantile of the standard normal distribution
+  tau <- atanh(tau)                     # threshold (transformed)
+  G <- 1 * (z > tau + q * z.sigma)      # construct the association graph
+  diag(G) <- 0                          # set the diagonal to zero
+  return(G)
+}
+
+asso_graph_partial_diff <- function(L1, L2, alpha = 0.05, n=12*145, tau = 0.5, bonf = TRUE) {
+  z <- abs(atanh(L1) - atanh(L2))       # Z transformation
+  d <- nrow(L1)                         # number of dimensions
+  z.sigma <- 2 / sqrt(n - d -1)    # variance
+  p <- nrow(z)                          # number of ROIs
+  m <- if (bonf) p * (p - 1) / 2 else 1 # number of hypothesis (edges in the graph)
+  q <- qnorm(1-alpha/m)                 # quantile of the standard normal distribution
+  tau <- atanh(tau)                     # threshold (transformed)
+  G <- 1 * (z > tau + q * z.sigma)      # construct the association graph
+  diag(G) <- 0                          # set the diagonal to zero
+  return(G)
+}
+
+paste("The number of edges for tau=0.1 for difference graph using partial correlation is:", sum(asso_graph_partial_diff(PCor.asd, PCor.td, tau = 0.1)))
+
+G.dif.Pcor <- asso_graph_partial_diff(PCor.asd, PCor.td, tau = 0)
+PCor.dif <- PCor.asd - PCor.td
+
+
+G.dif.Pcor.tbl <- as_tbl_graph(G.dif.Pcor * PCor.dif, directed = FALSE)
+
+
+# Order the nodes by superregion
+G.dif.Pcor.tbl <- G.dif.Pcor.tbl %>%
+  mutate(region = region) %>%
+  mutate(superregion = superregion) %>%
+  arrange(superregion, region, name)
+
+ggraph(G.dif.Pcor.tbl, layout = "circle") +
+  geom_edge_link(aes(color = weight^3), alpha = 0.8) +
+  scale_edge_colour_distiller(palette = "PiYG", direction = 1) +
+  geom_node_point(aes(color = superregion), size = 3) +
+  geom_mark_ellipse(aes(x = x, y = y, group = region, fill = region, filter = region %in% c("Cerebelum", "Frontal", "Temporal"), label=region), alpha = 0.2, show.legend = TRUE) +
+  labs(title = "Association Graph, Difference in Partial Correlation Estimates") +
+  theme_void()
+
+```
+
+We would have liked to used $\tau=0.1$ to have a clearer comparison between the difference graph for pearson and partial correlation, but there are no significantly different partial correlation coefficients for $\tau=0.1$. Nevertheless, we can see that the two graphs have their differences. The intra-correlation in the Cerebelum region that we have highlighted previously has changed. Now there is a mix of pink and green lines, rather than only green lines. We now that neurons in the brain light consecutively, to put it in very simple terms, a message from A to B may have to go trough C, if there are no direct connection between A and B. Thus, partial correlation effectively gives us the information about ROIs that are directly connected.
+
+In the partial correlation graph we see way more green links compared to the pearson correlation graph. This may imply sujects with ASD have more direct connections between ROIs than subjects with TD. This finding may suggest that subjects with ASD develop a brain network with more isolated work units, rather than a network with a lot of connections between work units. We don't know what to further conclude from this finding, as previously said, *we are no neuroscientists*.
+
+## References
+
+- Craddock, C., Benhajali, Y., Chu, C., Chouinard, F., Evans, A., Jakab, A., ... & Bellec, P. (2013). The neuro bureau preprocessing initiative: open sharing of preprocessed neuroimaging data and derivatives. *Frontiers in Neuroinformatics, 7,* 27.
+
+
+## Appendix
+
+### Hidden Code
+
+We have hid some code for better reading. The data `neuro.aal.rda` that contains the name of the ROIs was obtained from Klaus K. Holst's Github repository, https://github.com/kkholst/neurocdf. Tak Klaus! Here is how we created the labeling:
+
+```{r Non-Invis, echo=TRUE, message=FALSE, warning=FALSE}
+load("neuro.aal.rda")
+neuro.aal <- levels(neuro.aal$desc$label)
+# split desc with "_" and take the first element
+region <- sapply(neuro.aal, function(x) strsplit(x, "_")[[1]][1])
+
+region2lobe <- function(region) {
+  if (region %in% c("Amygdala", "Fusiform", "Heschl", "Hippocampus", "ParaHippocampal", "Temporal")) {
+    return("Temporal Lobe")
+  } else if (region %in% c("Cerebelum", "Vermis")) {
+    return("Posterior Fossa")
+  } else if (region %in% c("Insula", "Cingulum")) {
+    return("Insula and Cingulate Gyri")
+  } else if (region %in% c("Frontal", "Olfactory", "Rolandic", "Rectus", "Paracentral", "Precentral", "Supp")) {
+    return("Frontal Lobe")
+  } else if (region %in% c("Calcarine", "Cuneus", "Lingual", "Occipital")) {
+    return("Occipital Lobe")
+  } else if (region %in% c("Postcentral", "Parietal", "SupraMarginal", "Angular", "Precuneus")) {
+    return("Parietal Lobe")
+  } else if (region %in% c("Caudate", "Putamen", "Pallidum", "Thalamus")) {
+    return("Central Structures")
+  }
+}
+superregion <- sapply(region, region2lobe)
+```
+
+### Holm Bonferonni
+
+We have implemented the Holm Bonferonni method to test the significance sequentially. It did not change our results as our pooled data had a large number of observations. However, we have included the code for the method below.
+
+```{r warning=FALSE}
+asso_graph_HB <- function(R, alpha = 0.05, n=12*145, tau = 0.5) {
+  z <- abs(atanh(R))                    # Fisher Z transformation
+  z.sigma <- 1 / sqrt(n - 3)            # variance fisher z transformation
+  p <- nrow(z)                          # number of ROIs
+  m <- p * (p - 1) / 2                  # number of hypothesis (edges in the graph)
+  q <- qnorm(1-alpha/m)                 # quantile of the standard normal distribution
+  tau <- atanh(tau)                     # threshold (transformed)
+
+  # Get off-diagonal elements (transformed correlation coefficients)
+  z_array <- z[lower.tri(z, diag = FALSE)]
+  z_idx <- which(lower.tri(z, diag = FALSE))
+
+  # Order from largest to smallest
+  z_idx <- z_idx[order(z_array, decreasing = TRUE)]
+  z_array <- z_array[order(z_array, decreasing = TRUE)]
+
+  # Test the largest correlation coefficient and update qnorm
+  largest <- z_array[1];
+  
+  k <- 1
+  while (largest > tau + q * z.sigma && k < length(z_array)) {
+    k <- k + 1
+    largest <- z_array[k]
+    q <- qnorm(1 - 0.05 / (m - k + 1))
+  }
+
+  # Construct the graph
+  G <- matrix(0, nrow = 116, ncol = 116)
+  G[z_idx[1:(k-1)]] <- 1           # Add the edges to lower triangle
+  G <- G + t(G)                    # Add the edges to upper triangle
+
+  return(G)
+}
+
+G.asd.HB <- asso_graph_HB(R.asd, tau = 0.1)
+G.td.HB  <- asso_graph_HB(R.td, tau = 0.1)
+
+paste("Number of edges in the ASD and TD graphs using Holm-Bonferonni method:", 
+      sum(G.asd.HB) / 2, sum(G.td.HB) / 2)
+
+```
