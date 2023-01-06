@@ -51,7 +51,7 @@ Here we used Assumption 4 to equate $\mathrm{cov}(\epsilon_{i,j,k}, \epsilon_{i'
 
 Now, we know we have made very strong assumptions about the data. The data from Trinity probably has a time component to it as it was screened task based. Moreover, labs do follow up research thus them being independent of each other is not a good assumption. These aside, the more critical weakness is that the model is currently a Random Walk. This also is not the soundest option regarding biological facts. However, we hope our assumptions are not too far off from the truth and we can still get a good estimate of the correlation matrix. Here is some code:
 
-```{r}
+```{r Data processing}
 # Load the data
 # setwd("homework2")
 load("hw2_data.RData")
@@ -104,19 +104,39 @@ Let's start with performing the **Fisher Z transformation** on the correlation m
 ```{r}
 asso_graph <- function(R, alpha = 0.05, n=12*145, tau = 0.5, bonf = TRUE) {
   z <- abs(atanh(R))                    # Fisher Z transformation
-  z.sigma <- 1 / sqrt(n - 3)            # variance fisher z transformation
+  z.sig <- 1 / sqrt(n - 3)              # variance fisher z transformation
   p <- nrow(z)                          # number of ROIs
   m <- if (bonf) p * (p - 1) / 2 else 1 # number of hypothesis (edges in the graph)
   q <- qnorm(1-alpha/m)                 # quantile of the standard normal distribution
   tau <- atanh(tau)                     # threshold (transformed)
-  G <- 1 * (z > tau + q * z.sigma)      # construct the association graph
+  G <- 1 * (z > tau + q * z.sig)        # construct the association graph
+  diag(G) <- 0                          # set the diagonal to zero
+  return(G)
+}
+```
+
+We will also be implementing the association graph for the difference of the correlation matrices. To test the significance of the difference in the correlation estimates, we will use the **Fisher Z transformation** again. In order to do so, we assume the null hypothesis $\rho_{j,k}^{ASD} = \rho_{j,k}^{TD}$ is equivalent with $Z_{j,k}^{ASD} = Z_{j,k}^{TD}$ where $Z_{j,k}^{ASD}$ and $Z_{j,k}^{TD}$ are the Fisher Z transformed correlation coefficients of ROI $j$ and $k$. Since we know that $Z_{j,k} \sim \mathrm{N}_1(\theta_{j,k}, \frac{1}{n-3})$, thus the difference approximates to
+
+$$Z_{j,k}^{ASD} - Z_{j,k}^{TD} \sim \mathrm{N}_1(\theta_{j,k}^{ASD} - \theta_{j,k}^{TD}, \frac{2}{n-3})$$.
+
+Let's execute!
+
+```{r}
+asso_graph_diff <- function(R1, R2, alpha = 0.05, n=12*145, tau = 0.5, bonf = TRUE) {
+  z <- abs(atanh(R1) - atanh(R2))       # Fisher Z transformation
+  z.sig <- sqrt(2 / (n - 3))            # variance fisher z transformation
+  p <- nrow(z)                          # number of ROIs
+  m <- if (bonf) p * (p - 1) / 2 else 1 # number of hypothesis (edges in the graph)
+  q <- qnorm(1-alpha/m)                 # quantile of the standard normal distribution
+  tau <- atanh(tau)                     # threshold (transformed)
+  G <- 1 * (z > tau + q * z.sig)        # construct the association graph
   diag(G) <- 0                          # set the diagonal to zero
   return(G)
 }
 
 G.asd <- asso_graph(R.asd)
 G.td  <- asso_graph(R.td)
-G.dif <- asso_graph(R.asd - R.td)
+G.dif <- asso_graph_diff(R.asd, R.td)
 
 paste("Number of edges in the ASD, TD and their difference graphs using Bonferonni correction:", 
       sum(G.asd) / 2, sum(G.td) / 2, sum(G.dif) / 2)
@@ -128,14 +148,15 @@ Now, we want to select a threshold $\tau$ to construct the association graphs. W
 m <- 200
 tau_grid <- seq(0, 1, length.out = m)
 
-num_edges <- matrix(NA, nrow = m, ncol = 3)
-colnames(num_edges) <- c("ASD", "TD", "Difference")
+num_edges <- matrix(NA, nrow = m, ncol = 4)
+colnames(num_edges) <- c("ASD", "TD", "SymmetricDif", "Difference")
 
 for (i in 1:m) {
   G.asd <- asso_graph(R.asd, tau = tau_grid[i])
   G.td  <- asso_graph(R.td,  tau = tau_grid[i])
+  G.syd <- (G.asd + G.td) == 1
   G.dif <- asso_graph(R.asd - R.td, tau = tau_grid[i])
-  num_edges[i, ] <- c(sum(G.asd) / 2, sum(G.td) / 2, sum(G.dif) / 2)
+  num_edges[i, ] <- c(sum(G.asd) / 2, sum(G.td) / 2, sum(G.syd) / 2, sum(G.dif) / 2)
 }
 
 library(ggplot2, quietly = TRUE)
@@ -144,21 +165,29 @@ num_edges <- as.data.frame(num_edges)
 ggplot(num_edges, aes(x = tau_grid)) +
   geom_line(aes(y = ASD, color = "ASD")) +
   geom_line(aes(y = TD, color = "TD")) +
+  geom_line(aes(y = SymmetricDif, color = "SymmetricDif")) +
   geom_line(aes(y = Difference, color = "Difference")) +
   scale_y_continuous(
-    sec.axis = sec_axis(~./(116*115)*100, name = "Percentage of Edges (%)", breaks = seq(0, 13, 2)),
+    sec.axis = sec_axis(~./(116*115)*100, name = "Percentage of Edges (%)", breaks = 2^seq(0, 8)/10),
     trans = "log2") +
-  #scale_y_continuous(trans='log2') +
   labs(title = "Number of Edges in the Graph as a Function of Threshold",
        x = "Threshold", y = "Number of Edges") +
   theme_minimal()
 ```
 
+#### *Un petit interlude on the intrepeting the plot*
+
+At $\tau = 0$ we have `r sum(asso_graph_diff(R.asd, R.td, tau = 0))` edges in the difference graph. This means that there are `r sum(asso_graph_diff(R.asd, R.td, tau = 0))` correlation coefficients that are significantly different between the ASD and TD groups. While for the ASD and TD graph the points at $\tau=0$ shows the number of correlation coefficients that are significantly different from zero. So even though they are in the same plot for practical purposes, be aware $\tau$ does not convey the same meaning for the ASD and TD graph as it does for the difference graph.
+
+In the plot, you can see that as the threshold increases the number of edges in the graph decreases, as expected. Moreover, the number of edges in the ASD and TD graph follow each other very closely, and for clarity we have plotted the symmetric difference of the two graphs as well, that is the total number of edges in the graph that are not in the other graph. So even for higher thresholds we do get many unique edges in each graph. The difference graph, on the other hand, shows a different behavior. The number of edges in the graph decreases much more rapidly than the other two graphs. This is not surprising, as explained in the interlude above.
+
+Moving on, we will use the the results from the difference graph as it serves better for our goal, as we want to extrapolate the differences between subject's brains that are Autism Spectrum Disorder and those Typically Developed
+
 ## Task 3: Comparing the Association Graphs
 
 In this part, we will compare the two association graphs. In order to do so, we will use the packages `ggraph` and `tidygraph` to plot the graphs.
 
-```{r}
+```{r warning=FALSE}
 library(ggraph, quietly = TRUE)
 library(tidygraph, quietly = TRUE)
 
@@ -168,24 +197,16 @@ neuro.aal <- levels(neuro.aal$desc$label)
 # split desc with "_" and take the first element
 superregion <- sapply(neuro.aal, function(x) strsplit(x, "_")[[1]][1])
 
-G.asd <- asso_graph(R.asd, tau = 0.5)
-as_tbl_graph(G.asd * R.asd, directed = FALSE) %>%
-  ggraph(layout = "circle") +
-  geom_edge_link(aes(color = weight), alpha = 0.5) +
-  scale_edge_colour_distiller(palette = "PuRd", direction = 1) +
-  geom_node_point(aes(color = superregion), size = 3) +
-  geom_node_text(aes(label = name), repel = TRUE) +
-  labs(title = "ASD Association Graph") +
-  theme_void()
+G.dif <- asso_graph_diff(R.asd, R.td, tau = 0)
+R.dif <- R.asd - R.td
 
-G.td <- asso_graph(R.td, tau = 0.5)
-as_tbl_graph(G.td * R.td, directed = FALSE) %>%
+as_tbl_graph(G.dif * R.dif, directed = FALSE) %>%
   ggraph(layout = "circle") +
   geom_edge_link(aes(color = weight), alpha = 0.5) +
   scale_edge_colour_distiller(palette = "PuRd", direction = 1) +
   geom_node_point(aes(color = superregion), size = 3) +
-  geom_node_text(aes(label = name), repel = TRUE) +
-  labs(title = "TD Association Graph") +
+  #geom_node_text(aes(label = name), repel = TRUE) +
+  labs(title = "Association Graph") +
   theme_void()
 
 ```
@@ -194,7 +215,7 @@ as_tbl_graph(G.td * R.td, directed = FALSE) %>%
 
 In this part, we will use the partial correlation to remove the effect of the other ROIs on the correlation between two ROIs. We will use the `pcor` function from the `ppcor` package to compare our code with the function.
 
-```{r}
+```{r warning=FALSE}
 library(ppcor, quietly = TRUE)
 
 PCor.asd.frompackage <- pcor(asd)$estimate
@@ -214,16 +235,14 @@ PCor.td <- mypcor(td)
 paste("The maximum difference between the partial correlation for ASD and TD from the package and our code is:", 
       max(abs(PCor.asd.frompackage - PCor.asd)), "and", max(abs(PCor.td.frompackage - PCor.td)))
 
-
-
 asso_graph_partial <- function(L, alpha = 0.05, n=12*145, tau = 0.5, bonf = TRUE) {
-  z <- abs(0.5 * (log(1+L) - log(1-L))) # Z transformation
-  d <- nrow(L)
+  z <- abs(atanh(L))                    # Z transformation
+  d <- nrow(L)                          # number of dimensions
   z.sigma <- 1 / sqrt(12*145 - d -1)    # variance
   p <- nrow(z)                          # number of ROIs
   m <- if (bonf) p * (p - 1) / 2 else 1 # number of hypothesis (edges in the graph)
   q <- qnorm(1-alpha/m)                 # quantile of the standard normal distribution
-  tau <- (log((1 + tau) / (1-tau))) / 2 # threshold (transformed)
+  tau <- atanh(tau)                     # threshold (transformed)
   G <- 1 * (z > tau + q * z.sigma)      # construct the association graph
   diag(G) <- 0                          # set the diagonal to zero
   return(G)
@@ -248,7 +267,7 @@ paste("Number of edges in the ASD and TD graphs using partial correlation:",
 
 Our implementation of the Holm Bonferonni correction is the following:
 
-```{r}
+```{r warning=FALSE}
 asso_graph_HB <- function(R, alpha = 0.05, n=12*145, tau = 0.5) {
   z <- abs(atanh(R))                    # Fisher Z transformation
   z.sigma <- 1 / sqrt(n - 3)            # variance fisher z transformation
