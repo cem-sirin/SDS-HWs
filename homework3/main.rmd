@@ -1,7 +1,7 @@
 
 ---
-title: "Homework 2 for SDS, Fall 2022"
-subtitle: "Analysing fMRI data to compare people of Autism Spectrum Disorder and Typicals"
+title: "Homework 3 for SDS, Fall 2022"
+subtitle: "TBD"
 author: "Cem Sirin & Sara Zeynalpour & Sophia Balestrucci & Vahid Ghanbarizadeh"
 date: "`r Sys.Date()`"
 output:
@@ -14,8 +14,115 @@ output:
 ---
 
 ## Task 1: Go Study!
-## Task 2: Essay on the Essence of Auxiliary Tests 
+## Task 2: Essay
+
+Prompt: "Read and understand Friedman’s paper. Write a short essay (< 1 A4 page) to summarize it. Also explain the essence of the auxiliary tests adopted (i.e. Mann-Whitney or KolmogorovSmirnov) and why we use them and not others."
+
+Paper: Friedman, J. H. (2003). On multivariate goodness–of–fit and two–sample testing. *Statistical Problems in Particle Physics, Astrophysics, and Cosmology, 1,* 311.
+
+### Essay
+
+Friedman (2003) introduces a new method for goodness–of–fit and two-sample testing. The article mentions that there plenty of existing powerful ways of testing in the univariate case. However, these tests loose power dramatically as the dimension (that is, the number of features) increases, also known as the curse of dimensionality. In order to overcome this problem, the author comes up with a clever idea to end up in a univariate case, even in higher dimensions. Briefly, the idea is to train a binary classification model to distinguish between the two samples. This trained binary classifier will assign a score to each sample, which is the confidence score of the sample belonging to the first sample. These scores are then used to construct a test statistic, which is a function of the scores.
+
+Suppose we have two samples, $\{x_i\}^N_{i=1}$ and $\{z_i\}^M_{i=1}$, and we want to test whether they come from the same distribution. The idea is to construct a test statistic, $T$, that is a function of the samples. Then, we can test the null hypothesis that $T$ is distributed according to a certain distribution, say the standard normal distribution. The test statistic is constructed as follows:
+
 ## Task 3: Simulation Study
+
+In order to test Friedman’s idea, we will setup a simulation study that will put it into practice. We will be using a logistic regression model to train a binary classifier. We will use the `glm` function from the `stats` package.
+
+To carry on the with example given in the slides, we will be simulating the number of errors by students coding $\{x_i\}_{i=1}^N$ and $\{z_i\}_{i=1}^N$ in R vs Python. We will use a Poisson distribution to simulate the number of errors. To simulate tests with different powers, we will use a different $\lambda_x$ and $\lambda_z$ for each test. We will use the following values for $\lambda_x=\{1,2,3,4,5\}$ and $\lambda_z=\{2,4,6,8,10\}$. Also, sample sizes $\{20,50,100,200\}$ will be used. We will use 1000 replications for each test.
+
+We will use Mann-Whitney, Kolmogorov-Smirnov, and the student's t-test to calculate the test statistics. Our null hypothesis is that the two samples come from the same distribution, and the alternative hypothesis is that they come from different distributions. Therefore we will use the **two-sided alternative** hypothesis for all the tests.
+
+```{r Data simulation, message=FALSE}
+library(tidyverse)
+
+# Function to simulate data
+sim_data <- function(lambda_x, lambda_z, n, M) {
+  # Initialize the data
+  x <- matrix(rpois(M*n, lambda_x), nrow = M, ncol = n)
+  z <- matrix(rpois(M*n, lambda_z), nrow = M, ncol = n)
+  # Return the data
+  return(list(x = x, z = z))
+}
+# Function to train the binary classifier
+train_model <- function(x, z, M, perm = FALSE) {
+  # Create binary labels, 1 for x and -1 for z
+  y <- matrix(NA, nrow = M, ncol = ncol(x) + ncol(z))
+  y[,1:ncol(x)] <- 1
+  y[,(ncol(x)+1):(ncol(x)+ncol(z))] <- 0
+
+  # Permute the labels if needed
+  if (perm) y <- t(apply(y, 1, sample))
+  # Initialize the scores
+  scores <- matrix(NA, nrow = M, ncol = ncol(x) + ncol(z))
+  
+  # Train the binary classifier
+  for (i in 1:M) {
+    # Create the training data
+    train <- rbind(cbind(x[i,], y[i,1:ncol(x)]), cbind(z[i,], y[i,(ncol(x)+1):(ncol(x)+ncol(z))])) %>%
+      as.data.frame()
+    # Train the model
+    classifier <- glm(V2 ~ V1, data = train, family = binomial(link = "logit"))
+    # Calculate the scores
+    scores[i,] <- classifier$fitted.values
+    }
+  # Return the scores
+  return(scores)
+}
+
+# Function to calculate the test statistics
+calc_stats <- function(scores, n, M) {
+  # Index of the x and z samples
+  idx_x <- 1:n
+  idx_z <- (n+1):(2*n)
+  # Initialize the test statistics
+  t_stat <- matrix(NA, nrow = M, ncol = 2)
+  # Calculate the test statistics
+  for (i in 1:M) {
+    t_stat[i,1] <- wilcox.test(scores[i,idx_x], scores[i,idx_z])$statistic
+    t_stat[i,2] <- ks.test(scores[i,idx_x], scores[i,idx_z])$statistic
+  }
+  colnames(t_stat) <- c("Wilcox", "KS")
+  # Return the test statistics
+  return(list(wilcox = t_stat[,1], ks = t_stat[,2]))
+}
+
+# Function to iterate J permutations
+perm_sim <- function(data, n, M, J) {
+  # Initialize the test statistics
+  wilcox <- matrix(NA, nrow = M, ncol = J)
+  ks     <- matrix(NA, nrow = M, ncol = J)
+  # Iterate over the permutations
+  for (j in 1:J) {
+    # Train the model
+    scores <- train_model(x = data$x, z = data$z, M = M, perm = TRUE)
+    # Calculate the test statistics
+    stats  <- calc_stats(scores = scores, n = n, M = M)
+    wilcox[,j] <- stats$wilcox
+    ks[,j]     <- stats$ks
+  }
+  # Return the test statistics
+  return(list(wilcox = wilcox, ks = ks))
+}
+
+# Poisson parameters
+lambda_x <- 4
+lambda_z <- 4
+
+n <- 10  # Sample size
+M <- 30 # Number of simulations
+J <- 100 # Number of permutations
+
+data   <- sim_data(lambda_x = lambda_x, lambda_z = lambda_z, n = n, M = M)
+scores <- train_model(x = data$x, z = data$z, M = M)
+stats  <- calc_stats(scores = scores, n = n, M = M)
+results <- perm_sim(data = data, n = n, M = M, J = J)
+
+(rowSums(results$wilcox > stats$wilcox) / J) %>% plot()
+(rowSums(results$ks     > stats$ks)     / J) %>% plot()
+```
+
 ## Task 4: Case Study
 
 ## Loading the data from the previous homework
@@ -49,5 +156,6 @@ td  <- do.call(rbind, td)
 ## References
 
 - Craddock, C., Benhajali, Y., Chu, C., Chouinard, F., Evans, A., Jakab, A., ... & Bellec, P. (2013). The neuro bureau preprocessing initiative: open sharing of preprocessed neuroimaging data and derivatives. *Frontiers in Neuroinformatics, 7,* 27.
+- Friedman, J. H. (2003). On multivariate goodness–of–fit and two–sample testing. *Statistical Problems in Particle Physics, Astrophysics, and Cosmology, 1,* 311.
 
 ## Appendix
