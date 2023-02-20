@@ -1,7 +1,7 @@
 
 ---
 title: "Homework 3 for SDS, Fall 2022"
-subtitle: "TBD"
+subtitle: "Two-Sample Testing"
 author: "Cem Sirin & Sara Zeynalpour & Sophia Balestrucci & Vahid Ghanbarizadeh"
 date: "`r Sys.Date()`"
 output:
@@ -34,7 +34,7 @@ To carry on the with example given in the slides, we will be simulating the numb
 
 We will use Mann-Whitney, Kolmogorov-Smirnov, and the student's t-test to calculate the test statistics. Our null hypothesis is that the two samples come from the same distribution, and the alternative hypothesis is that they come from different distributions. Therefore we will use the **two-sided alternative** hypothesis for all the tests.
 
-```{r Data simulation, message=FALSE}
+```{r Data simulation, message=FALSE, include=FALSE}
 library(tidyverse)
 
 # Function to simulate data
@@ -48,40 +48,48 @@ sim_data <- function(lambda_x, lambda_z, n, M) {
 # Function to train the binary classifier
 train_model <- function(x, z, M, perm = FALSE) {
   # Create binary labels, 1 for x and -1 for z
-  y <- matrix(NA, nrow = M, ncol = ncol(x) + ncol(z))
+  y <- matrix(0, nrow = M, ncol = ncol(x) + ncol(z))
   y[,1:ncol(x)] <- 1
-  y[,(ncol(x)+1):(ncol(x)+ncol(z))] <- 0
 
   # Permute the labels if needed
   if (perm) y <- t(apply(y, 1, sample))
+
+  # Index of the 0 and 1 samples
+  idx_x <- matrix(NA, nrow = M, ncol = ncol(x))
+  idx_z <- matrix(NA, nrow = M, ncol = ncol(z))
+
+  for (i in 1:M) {
+    idx_x[i,] <- which(y[i,] == 1)
+    idx_z[i,] <- which(y[i,] == 0)
+  }
+
   # Initialize the scores
   scores <- matrix(NA, nrow = M, ncol = ncol(x) + ncol(z))
-  
+
   # Train the binary classifier
   for (i in 1:M) {
     # Create the training data
-    train <- rbind(cbind(x[i,], y[i,1:ncol(x)]), cbind(z[i,], y[i,(ncol(x)+1):(ncol(x)+ncol(z))])) %>%
-      as.data.frame()
+    train <- cbind(c(x[i,], z[i,]), y[i,]) %>% as.data.frame()
     # Train the model
     classifier <- glm(V2 ~ V1, data = train, family = binomial(link = "logit"))
     # Calculate the scores
     scores[i,] <- classifier$fitted.values
-    }
-  # Return the scores
-  return(scores)
+  }
+  # Return the scores, idx_x, and idx_z
+  return(list(scores = scores, idx_x = idx_x, idx_z = idx_z))
 }
 
+# surpess warnings
+# options(warn=-1)
+
 # Function to calculate the test statistics
-calc_stats <- function(scores, n, M) {
-  # Index of the x and z samples
-  idx_x <- 1:n
-  idx_z <- (n+1):(2*n)
+calc_stats <- function(scores, idx_x, idx_z, n, M) {
   # Initialize the test statistics
   t_stat <- matrix(NA, nrow = M, ncol = 2)
   # Calculate the test statistics
   for (i in 1:M) {
-    t_stat[i,1] <- wilcox.test(scores[i,idx_x], scores[i,idx_z])$statistic
-    t_stat[i,2] <- ks.test(scores[i,idx_x], scores[i,idx_z])$statistic
+    t_stat[i,1] <- wilcox.test(scores[i,idx_x[i,]], scores[i,idx_z[i,]])$statistic
+    t_stat[i,2] <- ks.test(scores[i,idx_x[i,]], scores[i,idx_z[i,]])$statistic
   }
   colnames(t_stat) <- c("Wilcox", "KS")
   # Return the test statistics
@@ -98,29 +106,29 @@ perm_sim <- function(data, n, M, J) {
     # Train the model
     scores <- train_model(x = data$x, z = data$z, M = M, perm = TRUE)
     # Calculate the test statistics
-    stats  <- calc_stats(scores = scores, n = n, M = M)
+    stats  <- calc_stats(scores = scores$scores, idx_x = scores$idx_x, idx_z = scores$idx_z, n = n, M = M)
     wilcox[,j] <- stats$wilcox
     ks[,j]     <- stats$ks
   }
   # Return the test statistics
   return(list(wilcox = wilcox, ks = ks))
 }
+```
 
+```{r Simulation study, warning=FALSE}
 # Poisson parameters
 lambda_x <- 4
-lambda_z <- 4
+lambda_z <- 6
 
-n <- 10  # Sample size
-M <- 30 # Number of simulations
+n <- 20  # Sample size
+M <- 10 # Number of simulations
 J <- 100 # Number of permutations
 
 data   <- sim_data(lambda_x = lambda_x, lambda_z = lambda_z, n = n, M = M)
 scores <- train_model(x = data$x, z = data$z, M = M)
-stats  <- calc_stats(scores = scores, n = n, M = M)
+stats  <- calc_stats(scores = scores$scores, idx_x = scores$idx_x, idx_z = scores$idx_z, n = n, M = M)
 results <- perm_sim(data = data, n = n, M = M, J = J)
 
-(rowSums(results$wilcox > stats$wilcox) / J) %>% plot()
-(rowSums(results$ks     > stats$ks)     / J) %>% plot()
 ```
 
 ## Task 4: Case Study
@@ -159,3 +167,84 @@ td  <- do.call(rbind, td)
 - Friedman, J. H. (2003). On multivariate goodness–of–fit and two–sample testing. *Statistical Problems in Particle Physics, Astrophysics, and Cosmology, 1,* 311.
 
 ## Appendix
+
+```{r Appendix 1, message=FALSE}
+library(tidyverse)
+
+# Function to simulate data
+sim_data <- function(lambda_x, lambda_z, n, M) {
+  # Initialize the data
+  x <- matrix(rpois(M*n, lambda_x), nrow = M, ncol = n)
+  z <- matrix(rpois(M*n, lambda_z), nrow = M, ncol = n)
+  # Return the data
+  return(list(x = x, z = z))
+}
+# Function to train the binary classifier
+train_model <- function(x, z, M, perm = FALSE) {
+  # Create binary labels, 1 for x and -1 for z
+  y <- matrix(0, nrow = M, ncol = ncol(x) + ncol(z))
+  y[,1:ncol(x)] <- 1
+
+  # Permute the labels if needed
+  if (perm) y <- t(apply(y, 1, sample))
+
+  # Index of the 0 and 1 samples
+  idx_x <- matrix(NA, nrow = M, ncol = ncol(x))
+  idx_z <- matrix(NA, nrow = M, ncol = ncol(z))
+
+  for (i in 1:M) {
+    idx_x[i,] <- which(y[i,] == 1)
+    idx_z[i,] <- which(y[i,] == 0)
+  }
+
+  # Initialize the scores
+  scores <- matrix(NA, nrow = M, ncol = ncol(x) + ncol(z))
+
+  # Train the binary classifier
+  for (i in 1:M) {
+    # Create the training data
+    train <- cbind(c(x[i,], z[i,]), y[i,]) %>% as.data.frame()
+    # Train the model
+    classifier <- glm(V2 ~ V1, data = train, family = binomial(link = "logit"))
+    # Calculate the scores
+    scores[i,] <- classifier$fitted.values
+  }
+  # Return the scores, idx_x, and idx_z
+  return(list(scores = scores, idx_x = idx_x, idx_z = idx_z))
+}
+
+# surpess warnings
+# options(warn=-1)
+
+# Function to calculate the test statistics
+calc_stats <- function(scores, idx_x, idx_z, n, M) {
+  # Initialize the test statistics
+  t_stat <- matrix(NA, nrow = M, ncol = 2)
+  # Calculate the test statistics
+  for (i in 1:M) {
+    t_stat[i,1] <- wilcox.test(scores[i,idx_x[i,]], scores[i,idx_z[i,]])$statistic
+    t_stat[i,2] <- ks.test(scores[i,idx_x[i,]], scores[i,idx_z[i,]])$statistic
+  }
+  colnames(t_stat) <- c("Wilcox", "KS")
+  # Return the test statistics
+  return(list(wilcox = t_stat[,1], ks = t_stat[,2]))
+}
+
+# Function to iterate J permutations
+perm_sim <- function(data, n, M, J) {
+  # Initialize the test statistics
+  wilcox <- matrix(NA, nrow = M, ncol = J)
+  ks     <- matrix(NA, nrow = M, ncol = J)
+  # Iterate over the permutations
+  for (j in 1:J) {
+    # Train the model
+    scores <- train_model(x = data$x, z = data$z, M = M, perm = TRUE)
+    # Calculate the test statistics
+    stats  <- calc_stats(scores = scores$scores, idx_x = scores$idx_x, idx_z = scores$idx_z, n = n, M = M)
+    wilcox[,j] <- stats$wilcox
+    ks[,j]     <- stats$ks
+  }
+  # Return the test statistics
+  return(list(wilcox = wilcox, ks = ks))
+}
+```
