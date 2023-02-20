@@ -30,9 +30,8 @@ Suppose we have two samples, $\{x_i\}^N_{i=1}$ and $\{z_i\}^M_{i=1}$, and we wan
 
 In order to test Friedman’s idea, we will setup a simulation study that will put it into practice. We will be using a logistic regression model to train a binary classifier. We will use the `glm` function from the `stats` package.
 
-To carry on the with example given in the slides, we will be simulating the number of errors by students coding $\{x_i\}_{i=1}^N$ and $\{z_i\}_{i=1}^N$ in R vs Python. We will use a Poisson distribution to simulate the number of errors. To simulate tests with different powers, we will use a different $\lambda_x$ and $\lambda_z$ for each test. We will use the following values for $\lambda_x=\{1,2,3,4,5\}$ and $\lambda_z=\{2,4,6,8,10\}$. Also, sample sizes $\{20,50,100,200\}$ will be used. We will use 1000 replications for each test.
+To carry on the with example given in the slides, we will be simulating the number of errors by students coding $\{x_i\}_{i=1}^N$ and $\{z_i\}_{i=1}^N$ in R vs Python. We will use a Poisson distribution to simulate the number of errors. To simulate tests with different powers and variance, we may tinker with many parameters, however, the outcomes are inline with the intuition. Therefore, we will only change the rate parameter of the Poisson distribution, $\lambda$, of the second sample, $\{z_i\}_{i=1}^N$. We will use $\lambda = 1.5$ for the first sample, $\{x_i\}_{i=1}^N$, and $\lambda = 2.5$ for the second sample, $\{z_i\}_{i=1}^N$. We will use $N = 20$ and $M = 1000$.
 
-We will use Mann-Whitney, Kolmogorov-Smirnov, and the student's t-test to calculate the test statistics. Our null hypothesis is that the two samples come from the same distribution, and the alternative hypothesis is that they come from different distributions. Therefore we will use the **two-sided alternative** hypothesis for all the tests.
 
 ```{r Data simulation, message=FALSE, include=FALSE}
 library(tidyverse)
@@ -45,6 +44,8 @@ sim_data <- function(lambda_x, lambda_z, n, M) {
   # Return the data
   return(list(x = x, z = z))
 }
+x <- data$x
+z <- data$z
 # Function to train the binary classifier
 train_model <- function(x, z, M, perm = FALSE) {
   # Create binary labels, 1 for x and -1 for z
@@ -55,13 +56,17 @@ train_model <- function(x, z, M, perm = FALSE) {
   if (perm) y <- t(apply(y, 1, sample))
 
   # Index of the 0 and 1 samples
-  idx_x <- matrix(NA, nrow = M, ncol = ncol(x))
-  idx_z <- matrix(NA, nrow = M, ncol = ncol(z))
+  # idx_x <- matrix(NA, nrow = M, ncol = ncol(x))
+  # idx_z <- matrix(NA, nrow = M, ncol = ncol(z))
 
-  for (i in 1:M) {
-    idx_x[i,] <- which(y[i,] == 1)
-    idx_z[i,] <- which(y[i,] == 0)
-  }
+  # for (i in 1:M) {
+  #   idx_x[i,] <- which(y[i,] == 1)
+  #   idx_z[i,] <- which(y[i,] == 0)
+  # }
+
+  ## replace for loop with apply
+  idx_x <- t(apply(y, 1, function(x) which(x == 1)))
+  idx_z <- t(apply(y, 1, function(x) which(x == 0)))
 
   # Initialize the scores
   scores <- matrix(NA, nrow = M, ncol = ncol(x) + ncol(z))
@@ -75,6 +80,18 @@ train_model <- function(x, z, M, perm = FALSE) {
     # Calculate the scores
     scores[i,] <- classifier$fitted.values
   }
+
+  # TODO: replace the for loop with apply
+  # fit_values <- function(row) {
+  #   train <- cbind(c(row$x, row$z), row$y) %>% as.data.frame()
+  #   classifier <- glm(V2 ~ V1, data = train, family = binomial(link = "logit"))
+  #   classifier$fitted.values
+  # }
+
+  # merged <- tibble(x = x, z = z, y = y)
+  # scores_with_apply <- apply(merged, 1, fit_values)
+
+  # merged[1,]$x
   # Return the scores, idx_x, and idx_z
   return(list(scores = scores, idx_x = idx_x, idx_z = idx_z))
 }
@@ -115,20 +132,47 @@ perm_sim <- function(data, n, M, J) {
 }
 ```
 
-```{r Simulation study, warning=FALSE}
-# Poisson parameters
+```{r warning=FALSE}
 lambda_x <- 4
-lambda_z <- 6
+lambda_z_grid <- lambda_x + 0:4 / 2
 
 n <- 20  # Sample size
-M <- 10 # Number of simulations
-J <- 100 # Number of permutations
+M <- 20 # Number of simulations
+J <- 20 # Number of permutations
 
-data   <- sim_data(lambda_x = lambda_x, lambda_z = lambda_z, n = n, M = M)
-scores <- train_model(x = data$x, z = data$z, M = M)
-stats  <- calc_stats(scores = scores$scores, idx_x = scores$idx_x, idx_z = scores$idx_z, n = n, M = M)
-results <- perm_sim(data = data, n = n, M = M, J = J)
+pwilcox <- matrix(NA, nrow = M, ncol = length(lambda_z_grid))
+pks     <- matrix(NA, nrow = M, ncol = length(lambda_z_grid))
 
+for (i in 1:length(lambda_z_grid)) {
+  print(paste("lambda_z =", lambda_z_grid[i]))
+  data   <- sim_data(lambda_x = lambda_x, lambda_z = lambda_z_grid[i], n = n, M = M)
+  scores <- train_model(x = data$x, z = data$z, M = M)
+  stats  <- calc_stats(scores = scores$scores, idx_x = scores$idx_x, idx_z = scores$idx_z, n = n, M = M)
+  results <- perm_sim(data = data, n = n, M = M, J = J)
+
+  pwilcox[,i] <- rowSums(results$wilcox >= stats$wilcox) / J
+  pks[,i]     <- rowSums(results$ks     >= stats$ks)     / J
+}
+
+library(ggplot2)
+# function to plot boxplots for every column
+boxplot_columns <- function(df, xlab = "x", ylab = "y", main = "main") {
+  ggplot(stack(df), aes(x = ind, y = values)) + geom_boxplot() + labs(x = xlab, y = ylab, title = main)
+}
+
+# boxplot of the p-values for Wilcox
+pwilcox <- data.frame(pwilcox)
+colnames(pwilcox) <- lambda_z_grid
+boxplot_columns(pwilcox, xlab = "lambda_z", ylab = "p-value", main = "p-values for the Wilcox test statistic")
+
+ggplot(stack(pwilcox), aes(x = ind, y = values)) + geom_boxplot() + labs(x = "lambda_z", y = "p-value", title = "p-values for the Wilcox test statistic")
+# save the plot
+ggsave("wilcox.png", width = 10, height = 5)
+
+# boxplot of the p-values for KS
+pks <- data.frame(pks)
+colnames(pks) <- lambda_z_grid
+boxplot_columns(pks, xlab = "lambda_z", ylab = "p-value", main = "p-values for the KS test statistic")
 ```
 
 ## Task 4: Case Study
